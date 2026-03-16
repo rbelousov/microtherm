@@ -1,0 +1,13 @@
+site_name: Microtherm reference
+theme:
+  name: material
+
+plugins:
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_submodules: true
+watch:
+  - microtherm

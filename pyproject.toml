@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "microtherm"
+version = "0.0.0"
+description = "Microcaliber theory of thermodiffusion"
+authors = [{ name = "Roman Belousov", email = "roman.belousov@embl.de" }]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.14"
+
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "jupyterlab",
+    "ipywidgets",
+    "tqdm",
+    "uncertainties"
+]
+
+[project.optional-dependencies]
+tests = ["pytest"]
+dev = ["pytest", "pydocstringformatter", "ruff", "pyright"]
+doc = ["mkdocs", "mkdocstrings[python]", "mkdocs-material"]
+examples = ["matplotlib", "jupyterlab", "ipywidgets", "tqdm", "pillow"]
+
+[tool.setuptools]
+packages = ["microtherm"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.pydocstringformatter]
+write = true
+
+[tool.ruff]
+src = ["microtherm", "tests"]
+include = ["**/*.py", "**/*.ipynb"]
+
+[tool.ruff.lint]
+extend-select = ["D"]
+ignore = [
+  "D203",  # no blank line before class docstring (keep D211)
+  "D213",  # summary on first line (keep D212)
+  "D400", "D413", "D415", # Summary without period
+]
+
+[tool.docformatter]
+recursive = true
+in-place = true
+
+wrap-summaries = 88
+wrap-descriptions = 88
