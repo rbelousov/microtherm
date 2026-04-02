@@ -22,16 +22,6 @@
         <IDPairRange Type="All"/>
       </Interaction>
     </Interactions>
-    <!-- <Interactions>
-      <Interaction Type="HardSphere" Name="SelfHS" Diameter="0.2" Elasticity="1">
-        <IDPairRange Type="Self">
-          <IDRange Type="All"/>
-        </IDPairRange>
-      </Interaction>
-      <Interaction Type="Null" Name="NoPairs">
-        <IDPairRange Type="All"/>
-      </Interaction>
-    </Interactions> -->
 
     <!-- Plane walls (“Locals”). Temperature attribute makes a wall thermalizing. -->
     <Locals>
