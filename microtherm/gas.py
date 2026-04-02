@@ -2,11 +2,10 @@
 
 Attributes:
     DIM (int): Number of physical dimensions
-    Box (typing.TypeAlias): Simulation box
-    Vectors (typing.TypeAlias): Collection of 3D-vectors
 """
 
 import bz2
+from pathlib import Path
 import xml.etree.ElementTree as ET
 import numpy as np
 from numpy.typing import NDArray, ArrayLike
@@ -51,7 +50,7 @@ class State:
         np.savez(path, pos=self.pos, vel=self.vel, box=self.box)
 
     @classmethod
-    def load(cls, path: str) -> Self:
+    def load(cls, path: str | Path) -> Self:
         """Load data from a file.
 
         Args:
@@ -64,7 +63,7 @@ class State:
         return cls(box=data["box"], pos=data["pos"], vel=data["vel"])
 
     @classmethod
-    def from_dynamo_config(cls, path: str) -> Self:
+    def from_dynamo_config(cls, path: str | Path) -> Self:
         """Load data from an XML or archived XML configuration file for dynamO.
 
         Args:
@@ -73,7 +72,7 @@ class State:
         Returns:
             Loaded state
         """
-        if path.endswith(".bz2"):
+        if str(path).endswith(".bz2"):
             with bz2.open(path, "rb") as f:
                 tree = ET.parse(f)
         else:
@@ -81,13 +80,21 @@ class State:
         root = tree.getroot()
 
         sim_size: ET.Element = cast(ET.Element, root.find(".//SimulationSize"))
-        box = np.array(
+        domain = np.array(
             [
                 float(cast(str, sim_size.get("x"))),
                 float(cast(str, sim_size.get("y"))),
                 float(cast(str, sim_size.get("z"))),
-            ]
+            ],
+            dtype=float,
         )
+        diameters = [
+            float(cast(str, wall.get("Diameter")))
+            for wall in root.findall('.//Local[@Type="Wall"]')
+        ]
+        diameter = np.mean(diameters)
+        box = domain.copy()
+        box[0] -= np.sum(diameters)
 
         # All particles live under ParticleData/Pt with <P> (position) and <V> (velocity)
         pts = root.findall(".//Pt")
@@ -110,7 +117,8 @@ class State:
             ]
         pos += box / 2
         pos[:, 1:] %= box[1:]
-        assert np.all(pos < box) and np.all(pos > 0), (
+        eps = 1e-2 * diameter
+        assert np.all(pos < box + eps) and np.all(pos > -eps), (
             f"Gas state does not fit the simulation box {box}"
         )
 

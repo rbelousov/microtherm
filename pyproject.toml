@@ -47,10 +47,3 @@ ignore = [
   "D213",  # summary on first line (keep D212)
   "D400", "D413", "D415", # Summary without period
 ]
-
-[tool.docformatter]
-recursive = true
-in-place = true
-
-wrap-summaries = 88
-wrap-descriptions = 88

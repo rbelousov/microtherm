@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<DynamOconfig version="1.5.0">
+  <Simulation>
+    <Scheduler Type="NeighbourList">
+      <Sorter Type="BoundedPQMinMax3"/>
+    </Scheduler>
+
+    <!-- Size of the primary domain -->
+    <SimulationSize x="1.04" y="0.4" z="0.4"/>
+    <BC Type="PBC"/>
+
+    <!-- One species of point particles (mass=1) -->
+    <Genus>
+      <Species Name="Bulk" Type="Point" Mass="1">
+        <IDRange Type="All"/>
+      </Species>
+    </Genus>
+
+    <!-- Hard-sphere pair interaction -->
+    <Interactions>
+      <Interaction Type="HardSphere" Name="HS" Diameter="0.02" Elasticity="1">
+        <IDPairRange Type="All"/>
+      </Interaction>
+    </Interactions>
+    <!-- <Interactions>
+      <Interaction Type="HardSphere" Name="SelfHS" Diameter="0.2" Elasticity="1">
+        <IDPairRange Type="Self">
+          <IDRange Type="All"/>
+        </IDPairRange>
+      </Interaction>
+      <Interaction Type="Null" Name="NoPairs">
+        <IDPairRange Type="All"/>
+      </Interaction>
+    </Interactions> -->
+
+    <!-- Plane walls (“Locals”). Temperature attribute makes a wall thermalizing. -->
+    <Locals>
+      <Local Type="Wall" Name="LeftThermal" Diameter="0.02" Elasticity="1" Temperature="1.0">
+        <IDRange Type="All"/>
+        <Norm x="1" y="0" z="0"/>
+        <Origin x="-0.51" y="0" z="0"/>
+      </Local>
+      <Local Type="Wall" Name="RightThermal" Diameter="0.02" Elasticity="1" Temperature="0.5">
+        <IDRange Type="All"/>
+        <Norm x="-1" y="0" z="0"/>
+        <Origin x="0.51" y="0" z="0"/>
+      </Local>
+    </Locals>
+
+    <!-- Default dynamics/scheduler are fine; omitted for brevity -->
+    <Dynamics Type="Newtonian"/>
+  </Simulation>
+
+  <!-- Five particles: positions well inside the box; random-ish velocities -->
+  <ParticleData><Pt ID="0"><P x="-0.25" y="-0.1" z="-0.1"/><V x="0.20574050011581663" y="-0.033388506790030095" z="0.6249269331670422"/></Pt><Pt ID="1"><P x="-0.25" y="-0.1" z="0.1"/><V x="0.18873279146814875" y="-0.3628975492825028" z="0.3972651547453977"/></Pt><Pt ID="2"><P x="-0.25" y="0.1" z="-0.1"/><V x="1.1677937828521316" y="0.8477630306680066" z="-0.4725733851833466"/></Pt><Pt ID="3"><P x="-0.25" y="0.1" z="0.1"/><V x="-0.9301301000678616" y="-0.4344268052300716" z="0.13576654957194428"/></Pt><Pt ID="4"><P x="0.25" y="-0.1" z="-0.1"/><V x="-1.7952974735705767" y="-0.1041679831251691" z="-0.9152579998411223"/></Pt><Pt ID="5"><P x="0.25" y="-0.1" z="0.1"/><V x="-0.4948115869665848" y="-0.3699109362309529" z="-0.15623396749088977"/></Pt><Pt ID="6"><P x="0.25" y="0.1" z="-0.1"/><V x="0.4391771300286994" y="0.9256832641326322" z="-0.002924084093071627"/></Pt><Pt ID="7"><P x="0.25" y="0.1" z="0.1"/><V x="1.218794956140227" y="-0.4686545141419125" z="0.38903079912404603"/></Pt></ParticleData>
+</DynamOconfig>
