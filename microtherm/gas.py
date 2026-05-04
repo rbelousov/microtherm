@@ -19,17 +19,25 @@ class State:
 
     Attributes:
         box (numpy.typing.NDArray): Confining box
+        ids (list[str]): Particles' IDs
         pos (numpy.typing.NDArray): Collection of particles' positions
         vel (numpy.typing.NDArray): Collection of particles' velocities
     """
 
-    def __init__(self, pos: ArrayLike, vel: ArrayLike, box: ArrayLike = [1, 1, 1]):
+    def __init__(
+        self,
+        pos: ArrayLike,
+        vel: ArrayLike,
+        box: ArrayLike = [1, 1, 1],
+        ids: list[str] | None = None,
+    ):
         """Initialize state.
 
         Args:
             pos: Particles' positions
             vel: Particles' velocities
             box: Confining box
+            ids: Particles' IDs
 
         Raises:
             AssertionError: on inconsistent lenghts of positions and velocities
@@ -37,8 +45,17 @@ class State:
         self.pos = np.array(pos, dtype=float)
         self.vel = np.array(vel, dtype=float)
         self.box = np.array(box, dtype=float)
-        assert len(self.pos) == len(self.vel), (
-            f"Inconsistent sizes of positions ({len(self.pos)}) and velocities ({len(self.vel)})"
+
+        sz = len(self.pos)
+        if ids is None:
+            ids = range(sz)
+        self.ids = [str(id) for id in ids]
+
+        assert sz == len(self.vel), (
+            f"Inconsistent sizes of positions ({sz}) and velocities ({len(self.vel)})"
+        )
+        assert sz == len(self.ids), (
+            f"Inconsistent sizes of positions ({sz}) and IDs ({len(self.ids)})"
         )
 
     def save(self, path: str):
@@ -47,7 +64,7 @@ class State:
         Args:
             path: Path to the file
         """
-        np.savez(path, pos=self.pos, vel=self.vel, box=self.box)
+        np.savez(path, pos=self.pos, vel=self.vel, box=self.box, ids=np.array(self.ids))
 
     @classmethod
     def load(cls, path: str | Path) -> Self:
@@ -60,7 +77,9 @@ class State:
             Loaded state
         """
         data = np.load(path)
-        return cls(box=data["box"], pos=data["pos"], vel=data["vel"])
+        return cls(
+            ids=data["ids"].tolist(), box=data["box"], pos=data["pos"], vel=data["vel"]
+        )
 
     @classmethod
     def from_dynamo_config(cls, path: str | Path) -> Self:
@@ -99,10 +118,12 @@ class State:
         # All particles live under ParticleData/Pt with <P> (position) and <V> (velocity)
         pts = root.findall(".//Pt")
         sz = len(pts)
+        ids = []
         pos = np.empty((sz, 3), dtype=float)
         vel = np.empty((sz, 3), dtype=float)
 
         for idx, pt in enumerate(pts):
+            ids.append(cast(str, pt.get("ID")))
             p = cast(ET.Element, pt.find("P"))
             v = cast(ET.Element, pt.find("V"))
             pos[idx, :] = [
@@ -122,7 +143,7 @@ class State:
             f"Gas state does not fit the simulation box {box}"
         )
 
-        return cls(box=box, pos=pos, vel=vel)
+        return cls(ids=ids, box=box, pos=pos, vel=vel)
 
     def __len__(self) -> int:
         """Return number of particles."""

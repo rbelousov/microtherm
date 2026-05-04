@@ -1,7 +1,7 @@
 """Unit tests for `microtherm.gas` module."""
 
 import pytest
-from microtherm.gas import State
+from microtherm import Gas
 from pathlib import Path
 
 
@@ -13,6 +13,6 @@ def dynamo_config() -> Path:
 
 def test_state(dynamo_config):
     """Test `microtherm.gas.State`."""
-    state = State.from_dynamo_config(dynamo_config)
+    state = Gas.from_dynamo_config(dynamo_config)
     assert len(state) == 8
     assert state.box == pytest.approx([1.0, 0.4, 0.4])
