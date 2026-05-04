@@ -149,6 +149,37 @@ class State:
         """Return number of particles."""
         return len(self.pos)
 
+    def levels(self, sz: int, epsilon: float) -> dict[str, list[int]]:
+        """Return particles' spatial bins and energy levels.
+
+        Args:
+            sz: Number of spatial bins and energy levels
+            epsilon: Energy coefficient
+
+        Returns:
+            Mapping from particle ID to ``[bin, level]``
+
+        Raises:
+            ValueError: On non-positive number of bins or energy coefficient
+        """
+        if sz <= 0:
+            raise ValueError("Number of bins and levels must be positive")
+        if epsilon <= 0:
+            raise ValueError("Energy coefficient must be positive")
+
+        bin_width = self.box[0] / sz
+        bins = np.floor(self.pos[:, 0] / bin_width).astype(int)
+        bins = np.clip(bins, 0, sz - 1)
+
+        energies = np.sum(self.vel**2, axis=1) / 2
+        upper_bounds = epsilon * np.arange(1, sz) ** 2
+        levels = np.searchsorted(upper_bounds, energies, side="right")
+
+        return {
+            id: [int(bin), int(level)]
+            for id, bin, level in zip(self.ids, bins, levels, strict=True)
+        }
+
     def site_occupancies(self, nbins: int) -> NDArray[np.floating]:
         """Return particles' distributions along the x axis subdivided into bins.
 
