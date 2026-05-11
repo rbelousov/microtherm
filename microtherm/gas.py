@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from numpy.typing import NDArray, ArrayLike
 from typing import cast, Self
+from collections.abc import Iterable
 
 DIM: int = 3
 
@@ -47,9 +48,7 @@ class State:
         self.box = np.array(box, dtype=float)
 
         sz = len(self.pos)
-        if ids is None:
-            ids = range(sz)
-        self.ids = [str(id) for id in ids]
+        self.ids = [str(id) for id in cast(Iterable, range(sz) if ids is None else ids)]
 
         assert sz == len(self.vel), (
             f"Inconsistent sizes of positions ({sz}) and velocities ({len(self.vel)})"
@@ -172,7 +171,7 @@ class State:
         bins = np.clip(bins, 0, sz - 1)
 
         energies = np.sum(self.vel**2, axis=1) / 2
-        upper_bounds = epsilon * np.arange(1, sz) ** 2
+        upper_bounds = epsilon * np.arange(1, sz) ** 2 / 2
         levels = np.searchsorted(upper_bounds, energies, side="right")
 
         return {

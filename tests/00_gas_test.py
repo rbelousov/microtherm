@@ -39,7 +39,7 @@ def test_state_levels():
         ids=["below", "epsilon", "four_epsilon", "middle", "high"],
     )
 
-    assert state.levels(4, 1.0) == {
+    assert state.levels(4, 2.0) == {
         "below": [0, 0],
         "epsilon": [1, 1],
         "four_epsilon": [2, 2],
