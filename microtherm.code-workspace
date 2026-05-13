@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../microtherm"
+		},
+		{
+			"path": "../../ownCloud/work/microtherm.old"
 		}
 	]
 }

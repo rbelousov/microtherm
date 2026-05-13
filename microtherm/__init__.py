@@ -1,5 +1,6 @@
 """Simulations of energy and diffusive transport in simple gas models."""
 
-from .gas import State as Gas
+__all__ = ["Gas", "BoltzmannGas"]
 
-__all__ = ["Gas"]
+from .gas import State as Gas
+from .boltzmann_gas import State as BoltzmannGas

@@ -20,16 +20,13 @@ with zeta_J chosen so that sum_I P_IJ = 1 for every source state J.
 import json
 import warnings
 from collections.abc import Callable
-from typing import Any, ClassVar, TypeAlias, Self
+from typing import Any, ClassVar, TypeAlias, Self, cast
 import copy
 
 import numpy as np
 import numpy.typing as npt
 from scipy.optimize import root_scalar
-
 from .connectivity import nearest_neighbor_weights, transition_tensor
-
-Connectivity: TypeAlias = Callable[[int], np.ndarray]
 
 
 def energy_levels(nsites: int, scale: float = 1.0) -> npt.NDArray[np.floating]:
@@ -79,9 +76,9 @@ class State:
             if nsites is None:
                 raise ValueError("levels, betas, or nsites must be provided")
         elif levels is not None:
-            nsites = len(levels)
+            nsites = len(cast(np.ndarray, levels))
         else:
-            nsites = len(betas)  # type: ignore[arg-type]
+            nsites = len(cast(np.ndarray, betas))  # type: ignore[arg-type]
 
         assert nsites is not None
 
@@ -149,6 +146,66 @@ class State:
         if total <= 0:
             raise ValueError("cannot normalize a state with zero total occupation")
         self.levels /= total
+
+    @classmethod
+    def from_gas_levels(
+        cls,
+        gas_levels: dict[str, list[int]],
+        nsites: int | None = None,
+        betas: npt.ArrayLike | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> Self:
+        """Create a Boltzmann-gas state from particle site/energy assignments.
+
+        Args:
+            gas_levels: Mapping returned by ``microtherm.gas.State.levels``:
+                ``particle_id -> [site, level]``.
+            nsites: Number of sites and energy levels. If omitted, inferred
+                from the largest observed site or level index.
+            betas: Optional inverse-temperature profile.
+            meta: Optional JSON-serializable metadata.
+
+        Returns:
+            State with normalized occupation probabilities.
+        """
+        if not gas_levels:
+            raise ValueError("gas_levels must contain at least one particle")
+
+        values = list(gas_levels.values())
+        if any(len(assignment) != 2 for assignment in values):
+            raise ValueError("gas_levels values must be [site, level] pairs")
+
+        try:
+            assignments_float = np.array(values, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("site and level indices must be numeric") from exc
+
+        if assignments_float.ndim != 2 or assignments_float.shape[1] != 2:
+            raise ValueError("gas_levels values must be [site, level] pairs")
+        if not np.all(np.isfinite(assignments_float)):
+            raise ValueError("site and level indices must be finite")
+        if np.any(assignments_float < 0):
+            raise ValueError("site and level indices must be nonnegative")
+        if np.any(assignments_float != np.floor(assignments_float)):
+            raise ValueError("site and level indices must be integers")
+
+        assignments = assignments_float.astype(int)
+        required = int(assignments.max()) + 1
+
+        if nsites is None:
+            nsites = required
+        elif nsites <= 0:
+            raise ValueError(f"nsites must be positive, got {nsites}")
+        elif required > nsites:
+            raise ValueError(
+                f"gas_levels contains index {required - 1}, outside nsites={nsites}"
+            )
+
+        levels = np.zeros((nsites, nsites), dtype=float)
+        np.add.at(levels, (assignments[:, 0], assignments[:, 1]), 1.0)
+        levels /= len(gas_levels)
+
+        return cls(levels=levels, betas=betas, meta=meta)
 
     def save(self, path: str) -> None:
         """Save the state to a NumPy .npz file."""
@@ -247,7 +304,9 @@ class Model:
             else np.array(energies, dtype=float, copy=True)
         )
         if self.energies.shape != (nsites,):
-            raise ValueError(f"energies must have shape ({nsites},), got {self.energies.shape}")
+            raise ValueError(
+                f"energies must have shape ({nsites},), got {self.energies.shape}"
+            )
 
         self.weights = self._init_weights(connectivity, nsites)
         self.degeneracy = (
@@ -268,7 +327,9 @@ class Model:
         if np.any(weights < 0):
             raise ValueError("weights must be nonnegative")
         if np.any(weights.sum(axis=(0, 1)) <= 0):
-            raise ValueError("every source state must have at least one outgoing transition")
+            raise ValueError(
+                "every source state must have at least one outgoing transition"
+            )
         return weights
 
     def _validate_degeneracy(self, nsites: int) -> None:
@@ -343,7 +404,7 @@ class Model:
         max_dev = np.inf
         for sweep in range(self.maxiter):
             for site in free:
-                residual = balance(betas[site], int(site), betas)
+                residual = balance(cast(float, betas[site]), int(site), betas)
                 if abs(residual) < self.tol:
                     continue
 
@@ -378,9 +439,13 @@ class Model:
                 )
                 if sol.converged:
                     beta_new = float(sol.root)
-                    betas[site] = (1.0 - relax_beta) * betas[site] + relax_beta * beta_new
+                    betas[site] = (1.0 - relax_beta) * betas[
+                        site
+                    ] + relax_beta * beta_new
                 elif verbose:
-                    warnings.warn(f"Sweep {sweep}: beta solve did not converge at site {site}")
+                    warnings.warn(
+                        f"Sweep {sweep}: beta solve did not converge at site {site}"
+                    )
 
             residuals = self.energy_balance(betas)[free]
             max_dev = float(np.max(np.abs(residuals)))
@@ -406,7 +471,9 @@ class Model:
         grow: float,
     ) -> tuple[float, float, float, float]:
         """Expand the bracket [a, b] until it contains a root or reaches the beta_bracket limit."""
-        while fa * fb > 0.0 and (abs(a) < self.beta_bracket or abs(b) < self.beta_bracket):
+        while fa * fb > 0.0 and (
+            abs(a) < self.beta_bracket or abs(b) < self.beta_bracket
+        ):
             width = b - a
             a = max(-self.beta_bracket, a - grow * width / 2.0)
             b = min(self.beta_bracket, b + grow * width / 2.0)
