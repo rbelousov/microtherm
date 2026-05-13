@@ -128,7 +128,7 @@ def test_model_accepts_precomputed_weights():
     levels = np.ones((nsites, nsites), dtype=float)
     levels /= levels.sum()
 
-    weights = nearest_neighbor_weights(nsites)
+    weights = nearest_neighbor_weights(nsites, nsites)
 
     state = State(levels=levels)
 

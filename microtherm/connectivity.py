@@ -39,7 +39,7 @@ def reflect_index(nsites: int, target: int) -> int:
     return int(period - 1 - r)
 
 
-def nearest_neighbor_weights(nsites: int) -> np.ndarray:
+def nearest_neighbor_weights(nsites: int, nlevels: int) -> np.ndarray:
     """Nearest-neighbor transition weights with reflective path multiplicities.
 
     The nearest-neighbor graph allows transitions between sites with |ell - m| <= 1
@@ -51,12 +51,18 @@ def nearest_neighbor_weights(nsites: int) -> np.ndarray:
     later through the Boltzmann factor exp(-beta_ell * epsilon_i), not here.
 
     Args:
-        nsites: Number of lattice sites and energy levels.
+        nsites: Number of lattice sites.
+        nlevels: Number of energy levels.
 
     Returns:
         Weight tensor w[ell, i, m, j].
     """
-    weights = np.zeros((nsites, nsites, nsites, nsites), dtype=float)
+    if nsites <= 0:
+        raise ValueError(f"nsites must be positive, got {nsites}")
+    if nlevels <= 0:
+        raise ValueError(f"nlevels must be positive, got {nlevels}")
+
+    weights = np.zeros((nsites, nlevels, nsites, nlevels), dtype=float)
 
     for source_site in range(nsites):
         # Attempted nearest-neighbor displacements. Reflections may map
