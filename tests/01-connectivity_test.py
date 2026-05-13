@@ -44,3 +44,38 @@ def test_nearest_neighbors_rejects_nonpositive_sizes():
         nearest_neighbor_weights(0, 1)
     with pytest.raises(ValueError, match="nlevels must be positive"):
         nearest_neighbor_weights(1, 0)
+
+
+def test_transition_tensor_uses_source_energy_in_nonequilibrium():
+    """The source-energy factor must not cancel for site-dependent beta."""
+    from microtherm.connectivity import transition_tensor
+
+    weights = np.ones((2, 2, 2, 2), dtype=float)
+    beta = np.array([0.7, 1.3])
+    energy = np.array([0.0, 1.0])
+
+    transition = transition_tensor(weights, beta, energy)
+
+    expected = weights * np.exp(
+        beta[:, None, None, None]
+        * (energy[None, None, None, :] - energy[None, :, None, None])
+    )
+    expected /= expected.sum(axis=(0, 1), keepdims=True)
+
+    np.testing.assert_allclose(transition, expected)
+    np.testing.assert_allclose(transition.sum(axis=(0, 1)), 1.0)
+
+
+def test_transition_weights_inverts_isothermal_transition_tensor():
+    """Equilibrium transition probabilities recover normalized weights."""
+    from microtherm.connectivity import transition_tensor, transition_weights
+
+    raw = nearest_neighbor_weights(3, 4)
+    weights = raw / raw.sum(axis=(0, 1), keepdims=True)
+    energy = np.arange(4, dtype=float) ** 2 / 2.0
+    beta = 0.8
+
+    transition = transition_tensor(weights, np.full(3, beta), energy)
+    recovered = transition_weights(transition, beta, energy)
+
+    np.testing.assert_allclose(recovered, weights, rtol=1e-12, atol=1e-12)

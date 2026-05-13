@@ -12,7 +12,7 @@ I = (ell, i).
 The transition tensor is constructed from structural weights w[ell, i, m, j]
 according to the microcaliber form
 
-    P_IJ = w_IJ exp(-beta_ell epsilon_i) / zeta_J,
+    P_IJ = w_IJ exp[-beta_ell (epsilon_I - epsilon_J)] / zeta_J,
 
 with zeta_J chosen so that sum_I P_IJ = 1 for every source state J.
 """
@@ -42,7 +42,7 @@ def energy_levels(nlevels: int, scale: float = 1.0) -> npt.NDArray[np.floating]:
     """
     if nlevels <= 0:
         raise ValueError(f"nlevels must be positive, got {nlevels}")
-    return scale * np.arange(nlevels, dtype=float) ** 2 / 2.0
+    return scale * np.arange(1, nlevels + 1, dtype=float) ** 2 / 2.0
 
 
 class State:

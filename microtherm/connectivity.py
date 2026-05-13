@@ -5,6 +5,8 @@ The dynamical graph is represented by weights
     w_IJ = g_I * a_IJ * gamma_IJ
 
 where I = (target_site, target_level) and J = (source_site, source_level).
+The Markov tensor is normalized over destination states I for every source
+state J.
 """
 
 import numpy as np
@@ -47,8 +49,9 @@ def nearest_neighbor_weights(nsites: int, nlevels: int) -> np.ndarray:
     increases the path multiplicity gamma_IJ when multiple attempted moves
     land on the same reflected target.
 
-    All destination energy levels are allowed. The energy dependence enters
-    later through the Boltzmann factor exp(-beta_ell * epsilon_i), not here.
+    All destination and source energy-level pairs are structurally allowed.
+    The energy dependence enters later through the microcaliber factor
+    exp(-beta_ell * (epsilon_i - epsilon_j)), not here.
 
     Args:
         nsites: Number of lattice sites.
@@ -97,36 +100,26 @@ def flat_matrix(tensor: np.ndarray) -> np.ndarray:
     return tensor.reshape(nsites * nlevels, nsites * nlevels)
 
 
-def transition_tensor(
-    weights: np.ndarray,
-    beta: np.ndarray,
-    energy: np.ndarray,
-    degeneracy: np.ndarray | None = None,
-) -> np.ndarray:
-    """Build the Markov transition matrix P_IJ from structural weights.
-
-    For each source state J, this computes
-
-        P_IJ = w_IJ exp(-beta_ell epsilon_i) / zeta_J
-
-    where
-
-        zeta_J = sum_I w_IJ exp(-beta_ell epsilon_i).
-
-    Args:
-        weights: Structural weights w[ell, i, m, j].
-        beta: Inverse temperatures beta[ell].
-        energy: Energy levels epsilon[i].
-        degeneracy: Optional destination degeneracies g[ell, i] or g[i].
-            If omitted, all degeneracies are one.
-
-    Returns:
-        Markov transition tensor P[ell, i, m, j].
-    """
-    nsites, nlevels, _, _ = weights.shape
-
+def _validate_transition_inputs(
+    weights: np.ndarray, beta: np.ndarray, energy: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return validated transition inputs as floating-point arrays."""
+    weights = np.asarray(weights, dtype=float)
     beta = np.asarray(beta, dtype=float)
     energy = np.asarray(energy, dtype=float)
+
+    if weights.ndim != 4:
+        raise ValueError(
+            "weights must have shape (nsites, nlevels, nsites, nlevels); "
+            f"got {weights.shape}"
+        )
+
+    nsites, nlevels, nsites_2, nlevels_2 = weights.shape
+    if nsites != nsites_2 or nlevels != nlevels_2:
+        raise ValueError(
+            "weights must have shape (nsites, nlevels, nsites, nlevels); "
+            f"got {weights.shape}"
+        )
 
     if beta.shape != (nsites,):
         raise ValueError(f"beta must have shape ({nsites},), got {beta.shape}")
@@ -134,30 +127,125 @@ def transition_tensor(
     if energy.shape != (nlevels,):
         raise ValueError(f"energy must have shape ({nlevels},), got {energy.shape}")
 
-    boltzmann = np.exp(-beta[:, None] * energy[None, :])
+    return weights, beta, energy
+
+
+def transition_tensor(
+    weights: np.ndarray,
+    beta: np.ndarray,
+    energy: np.ndarray,
+    degeneracy: np.ndarray | None = None,
+) -> np.ndarray:
+    """Build the Markov transition tensor P[ell, i, m, j].
+
+    For each source state J = (m, j), this computes the microcaliber
+    transition probability
+
+        P_{ell,i|m,j} =
+            w_{ell,i|m,j} exp[-beta_ell (epsilon_i - epsilon_j)] / zeta_{m,j}
+
+    where zeta_{m,j} normalizes over destination states (ell, i).
+
+    The source-energy term cannot be dropped when beta varies with the
+    destination site ell. It cancels only in the isothermal case.
+
+    Args:
+        weights: Structural weights w[ell, i, m, j].
+        beta: Inverse temperatures beta[ell].
+        energy: Energy levels epsilon[i].
+        degeneracy: Optional destination degeneracies g[i] or g[ell, i].
+            If omitted, degeneracies are assumed to be included in weights or one.
+
+    Returns:
+        Markov transition tensor P[ell, i, m, j], normalized over (ell, i)
+        for every source state (m, j).
+    """
+    weights, beta, energy = _validate_transition_inputs(weights, beta, energy)
+    nsites, nlevels, _, _ = weights.shape
+
+    # factor[ell, i, j] = exp[-beta_ell * (epsilon_i - epsilon_j)]
+    #                      = exp[ beta_ell * (epsilon_j - epsilon_i)]
+    exponent = beta[:, None, None] * (
+        energy[None, None, :] - energy[None, :, None]
+    )
+    factor = np.exp(exponent)
 
     if degeneracy is not None:
         degeneracy = np.asarray(degeneracy, dtype=float)
 
         if degeneracy.shape == (nlevels,):
-            boltzmann = boltzmann * degeneracy[None, :]
+            factor = factor * degeneracy[None, :, None]
         elif degeneracy.shape == (nsites, nlevels):
-            boltzmann = boltzmann * degeneracy
+            factor = factor * degeneracy[:, :, None]
         else:
             raise ValueError(
                 "degeneracy must have shape "
                 f"({nlevels},) or ({nsites}, {nlevels}), got {degeneracy.shape}"
             )
 
-    unnormalized = weights * boltzmann[:, :, None, None]
+    unnormalized = weights * factor[:, :, None, :]
     zeta = unnormalized.sum(axis=(0, 1), keepdims=True)
 
-    # with np.errstate(divide="ignore", invalid="ignore"):
-    probs = np.divide(
+    return np.divide(
         unnormalized,
         zeta,
         out=np.zeros_like(unnormalized),
         where=zeta > 0,
     )
 
-    return probs
+
+def transition_weights(
+    transition: np.ndarray,
+    beta: float,
+    energy: np.ndarray,
+    *,
+    atol: float = 1e-12,
+) -> np.ndarray:
+    """Infer normalized weights from equilibrium transition probabilities.
+
+    This solves the equilibrium version of Eq. (S1),
+
+        P_{ell,i|m,j} ∝ w_{ell,i|m,j} exp[-beta * (epsilon_i - epsilon_j)],
+
+    with the normalization sum_{ell,i} w[ell, i, m, j] = 1. Because beta is
+    constant in the equilibrium calibration run, exp(beta * epsilon_j) cancels
+    for each fixed source state (m, j), leaving
+
+        w_{ell,i|m,j} ∝ P_{ell,i|m,j} exp(beta * epsilon_i).
+
+    Args:
+        transition: Measured transition probabilities P[ell, i, m, j].
+        beta: Equilibrium inverse temperature used to measure transition.
+        energy: Energy levels epsilon[i].
+        atol: Absolute tolerance for identifying zero-probability source states.
+
+    Returns:
+        Normalized weight tensor w[ell, i, m, j].
+    """
+    transition = np.asarray(transition, dtype=float)
+    energy = np.asarray(energy, dtype=float)
+
+    if transition.ndim != 4:
+        raise ValueError(
+            "transition must have shape (nsites, nlevels, nsites, nlevels); "
+            f"got {transition.shape}"
+        )
+
+    nsites, nlevels, nsites_2, nlevels_2 = transition.shape
+    if nsites != nsites_2 or nlevels != nlevels_2:
+        raise ValueError(
+            "transition must have shape (nsites, nlevels, nsites, nlevels); "
+            f"got {transition.shape}"
+        )
+
+    if energy.shape != (nlevels,):
+        raise ValueError(f"energy must have shape ({nlevels},), got {energy.shape}")
+
+    if np.any(transition < -atol):
+        raise ValueError("transition contains negative probabilities")
+
+    transition = np.clip(transition, 0.0, None)
+    raw = transition * np.exp(float(beta) * energy)[None, :, None, None]
+    norm = raw.sum(axis=(0, 1), keepdims=True)
+
+    return np.divide(raw, norm, out=np.zeros_like(raw), where=norm > atol)
