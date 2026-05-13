@@ -19,8 +19,9 @@ with zeta_J chosen so that sum_I P_IJ = 1 for every source state J.
 
 import json
 import warnings
+from pathlib import Path
 from collections.abc import Callable
-from typing import Any, ClassVar, TypeAlias, Self, cast
+from typing import Any, ClassVar, TypeAlias, Self, BinaryIO, cast
 import copy
 
 import numpy as np
@@ -207,7 +208,7 @@ class State:
 
         return cls(levels=levels, betas=betas, meta=meta)
 
-    def save(self, path: str) -> None:
+    def save(self, path: str | Path | BinaryIO) -> None:
         """Save the state to a NumPy .npz file."""
         data: dict[str, Any] = {
             "levels": self.levels,
