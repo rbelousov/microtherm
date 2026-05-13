@@ -30,19 +30,19 @@ from scipy.optimize import root_scalar
 from .connectivity import nearest_neighbor_weights, transition_tensor
 
 
-def energy_levels(nsites: int, scale: float = 1.0) -> npt.NDArray[np.floating]:
+def energy_levels(nlevels: int, scale: float = 1.0) -> npt.NDArray[np.floating]:
     """Return the default kinetic energy levels epsilon_i = scale * i^2 / 2.
 
     Args:
-        nsites: Number of lattice sites and energy levels.
+        nlevels: Number of energy levels.
         scale: Energy scale multiplying i^2 / 2.
 
     Returns:
         One-dimensional array of energy levels.
     """
-    if nsites <= 0:
-        raise ValueError(f"nsites must be positive, got {nsites}")
-    return scale * np.arange(nsites, dtype=float) ** 2 / 2.0
+    if nlevels <= 0:
+        raise ValueError(f"nlevels must be positive, got {nlevels}")
+    return scale * np.arange(nlevels, dtype=float) ** 2 / 2.0
 
 
 class State:
@@ -104,11 +104,6 @@ class State:
         """Validate the state attributes."""
         if self.levels.ndim != 2:
             raise ValueError(f"levels must be two-dimensional, got {self.levels.ndim}D")
-        if self.levels.shape[0] != self.levels.shape[1]:
-            raise ValueError(
-                "levels must have shape (nsites, nlevels) with nsites == nlevels; "
-                f"got {self.levels.shape}"
-            )
         if self.betas.shape != (self.levels.shape[0],):
             raise ValueError(
                 f"betas must have shape ({self.levels.shape[0]},), got {self.betas.shape}"
@@ -120,6 +115,11 @@ class State:
         """Return the lattice size."""
         return self.levels.shape[0]
 
+    @property
+    def nlevels(self) -> int:
+        """Return the number of energy levels."""
+        return self.levels.shape[1]
+
     def site_occupancies(self) -> npt.NDArray[np.floating]:
         """Return site occupation probabilities."""
         return self.levels.sum(axis=1)
@@ -128,7 +128,7 @@ class State:
         self, energies: npt.ArrayLike | None = None
     ) -> npt.NDArray[np.floating]:
         """Return site energies E[ell] = sum_i epsilon_i p[ell, i]."""
-        eps = energy_levels(len(self)) if energies is None else np.asarray(energies)
+        eps = energy_levels(self.nlevels) if energies is None else np.asarray(energies)
         return np.dot(self.levels, eps)
 
     def energy_profile(
@@ -153,6 +153,7 @@ class State:
         cls,
         gas_levels: dict[str, list[int]],
         nsites: int | None = None,
+        nlevels: int | None = None,
         betas: npt.ArrayLike | None = None,
         meta: dict[str, Any] | None = None,
     ) -> Self:
@@ -161,8 +162,10 @@ class State:
         Args:
             gas_levels: Mapping returned by ``microtherm.gas.State.levels``:
                 ``particle_id -> [site, level]``.
-            nsites: Number of sites and energy levels. If omitted, inferred
-                from the largest observed site or level index.
+            nsites: Number of sites. If omitted, inferred from the largest
+                observed site index.
+            nlevels: Number of energy levels. If omitted, inferred from the
+                largest observed level index.
             betas: Optional inverse-temperature profile.
             meta: Optional JSON-serializable metadata.
 
@@ -191,18 +194,29 @@ class State:
             raise ValueError("site and level indices must be integers")
 
         assignments = assignments_float.astype(int)
-        required = int(assignments.max()) + 1
+        required_sites = int(assignments[:, 0].max()) + 1
+        required_levels = int(assignments[:, 1].max()) + 1
 
         if nsites is None:
-            nsites = required
+            nsites = required_sites
         elif nsites <= 0:
             raise ValueError(f"nsites must be positive, got {nsites}")
-        elif required > nsites:
+        elif required_sites > nsites:
             raise ValueError(
-                f"gas_levels contains index {required - 1}, outside nsites={nsites}"
+                f"gas_levels contains site index {required_sites - 1}, outside nsites={nsites}"
             )
 
-        levels = np.zeros((nsites, nsites), dtype=float)
+        if nlevels is None:
+            nlevels = required_levels
+        elif nlevels <= 0:
+            raise ValueError(f"nlevels must be positive, got {nlevels}")
+        elif required_levels > nlevels:
+            raise ValueError(
+                "gas_levels contains level index "
+                f"{required_levels - 1}, outside nlevels={nlevels}"
+            )
+
+        levels = np.zeros((nsites, nlevels), dtype=float)
         np.add.at(levels, (assignments[:, 0], assignments[:, 1]), 1.0)
         levels /= len(gas_levels)
 
@@ -299,32 +313,35 @@ class Model:
         self.maxiter = int(maxiter)
 
         nsites = len(state)
+        nlevels = state.nlevels
         self.energies = (
-            energy_levels(nsites)
+            energy_levels(nlevels)
             if energies is None
             else np.array(energies, dtype=float, copy=True)
         )
-        if self.energies.shape != (nsites,):
+        if self.energies.shape != (nlevels,):
             raise ValueError(
-                f"energies must have shape ({nsites},), got {self.energies.shape}"
+                f"energies must have shape ({nlevels},), got {self.energies.shape}"
             )
 
-        self.weights = self._init_weights(connectivity, nsites)
+        self.weights = self._init_weights(connectivity, nsites, nlevels)
         self.degeneracy = (
             None if degeneracy is None else np.array(degeneracy, dtype=float, copy=True)
         )
-        self._validate_degeneracy(nsites)
+        self._validate_degeneracy(nsites, nlevels)
 
     @staticmethod
-    def _init_weights(connectivity: npt.ArrayLike | None, nsites: int) -> np.ndarray:
+    def _init_weights(
+        connectivity: npt.ArrayLike | None, nsites: int, nlevels: int
+    ) -> np.ndarray:
         if connectivity is None:
             weights = np.array(
-                nearest_neighbor_weights(nsites, nsites), dtype=float, copy=True
+                nearest_neighbor_weights(nsites, nlevels), dtype=float, copy=True
             )
         else:
             weights = np.array(connectivity, dtype=float, copy=True)
 
-        expected = (nsites, nsites, nsites, nsites)
+        expected = (nsites, nlevels, nsites, nlevels)
         if weights.shape != expected:
             raise ValueError(f"weights must have shape {expected}, got {weights.shape}")
         if np.any(weights < 0):
@@ -335,12 +352,12 @@ class Model:
             )
         return weights
 
-    def _validate_degeneracy(self, nsites: int) -> None:
+    def _validate_degeneracy(self, nsites: int, nlevels: int) -> None:
         if self.degeneracy is None:
             return
-        if self.degeneracy.shape not in {(nsites,), (nsites, nsites)}:
+        if self.degeneracy.shape not in {(nlevels,), (nsites, nlevels)}:
             raise ValueError(
-                f"degeneracy must have shape ({nsites},) or ({nsites}, {nsites}), "
+                f"degeneracy must have shape ({nlevels},) or ({nsites}, {nlevels}), "
                 f"got {self.degeneracy.shape}"
             )
         if np.any(self.degeneracy < 0):

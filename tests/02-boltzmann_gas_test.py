@@ -61,21 +61,39 @@ def test_state_from_gas_levels_rejects_invalid_assignments():
     with pytest.raises(ValueError, match="outside nsites=2"):
         State.from_gas_levels({"particle": [2, 0]}, nsites=2)
 
+    with pytest.raises(ValueError, match="outside nlevels=2"):
+        State.from_gas_levels({"particle": [0, 2]}, nlevels=2)
+
 
 def test_state_from_gas_levels_infers_or_preserves_size():
     """Test size inference and explicit trailing empty rows or columns."""
     gas_levels = {"a": [0, 1], "b": [1, 0]}
 
     inferred = State.from_gas_levels(gas_levels)
-    explicit = State.from_gas_levels(gas_levels, nsites=4)
+    explicit = State.from_gas_levels(gas_levels, nsites=4, nlevels=3)
 
     assert inferred.levels.shape == (2, 2)
-    assert explicit.levels.shape == (4, 4)
+    assert explicit.levels.shape == (4, 3)
     np.testing.assert_allclose(inferred.levels.sum(), 1.0)
     np.testing.assert_allclose(explicit.levels.sum(), 1.0)
     np.testing.assert_allclose(explicit.levels[:2, :2], inferred.levels)
     np.testing.assert_allclose(explicit.levels[2:, :], 0.0)
     np.testing.assert_allclose(explicit.levels[:, 2:], 0.0)
+
+
+def test_model_supports_arbitrary_nlevels():
+    """Model supports nlevels independent from nsites."""
+    levels = np.ones((4, 6), dtype=float)
+    levels /= levels.sum()
+
+    state = State(levels=levels)
+    model = Model(state=state, fixed_betas={0: 1.0, 3: 0.5}, maxiter=10)
+
+    new_state = model()
+
+    assert new_state.levels.shape == (4, 6)
+    assert cast(np.ndarray, new_state.transition).shape == (4, 6, 4, 6)
+    np.testing.assert_allclose(new_state.levels.sum(), 1.0, atol=1e-12)
 
 
 def test_model_preserves_probability_and_shapes():
