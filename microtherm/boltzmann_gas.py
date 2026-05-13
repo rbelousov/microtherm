@@ -318,7 +318,9 @@ class Model:
     @staticmethod
     def _init_weights(connectivity: npt.ArrayLike | None, nsites: int) -> np.ndarray:
         if connectivity is None:
-            weights = np.array(nearest_neighbor_weights(nsites), dtype=float, copy=True)
+            weights = np.array(
+                nearest_neighbor_weights(nsites, nsites), dtype=float, copy=True
+            )
         else:
             weights = np.array(connectivity, dtype=float, copy=True)
 
