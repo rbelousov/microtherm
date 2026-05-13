@@ -234,7 +234,7 @@ class State:
         np.savez(path, **data)
 
     @classmethod
-    def load(cls, path: str) -> Self:
+    def load(cls, path: str | Path | BinaryIO) -> Self:
         """Load a state from a NumPy .npz file.
 
         Returns:
