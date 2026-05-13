@@ -165,9 +165,7 @@ def transition_tensor(
 
     # factor[ell, i, j] = exp[-beta_ell * (epsilon_i - epsilon_j)]
     #                      = exp[ beta_ell * (epsilon_j - epsilon_i)]
-    exponent = beta[:, None, None] * (
-        energy[None, None, :] - energy[None, :, None]
-    )
+    exponent = beta[:, None, None] * (energy[None, None, :] - energy[None, :, None])
     factor = np.exp(exponent)
 
     if degeneracy is not None:

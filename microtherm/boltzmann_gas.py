@@ -525,3 +525,101 @@ class Model:
             meta=copy.deepcopy(self.state.meta),
         )
         return self.state
+
+    def local_equilibrium_kl(
+        self,
+        normalize_by_site: bool = True,
+        atol: float = 0.0,
+    ) -> npt.NDArray[np.floating]:
+        """Return the local-equilibrium KL divergence at each site.
+
+        For each site ell, this computes
+
+            D_KL[p(i | ell) || q_beta(i | ell)]
+
+        where p(i | ell) is the current conditional distribution over energy
+        levels at site ell, and q_beta is the local Boltzmann distribution
+
+            q_beta(i | ell) ∝ g_i exp[-beta[ell] * epsilon_i].
+
+        Args:
+            normalize_by_site: If True, compare conditional distributions over
+                energy levels at each site. If False, compare unnormalized site
+                contributions p[ell, i] against rho[ell] q_beta(i | ell), where
+                rho[ell] is the site occupancy. The resulting value is the same
+                for occupied sites, but empty sites contribute zero instead of NaN.
+            atol: Small cutoff used to ignore tiny negative values from numerical
+                noise. Values below -atol still raise an error.
+
+        Returns:
+            One-dimensional array kl[ell]. Empty sites return NaN when
+            normalize_by_site=True and 0 when normalize_by_site=False.
+        """
+        levels = np.asarray(self.state.levels, dtype=float)
+        betas = np.asarray(self.state.betas, dtype=float)
+        energies = np.asarray(self.energies, dtype=float)
+
+        if levels.ndim != 2:
+            raise ValueError(f"levels must be two-dimensional, got {levels.ndim}D")
+
+        nsites, nlevels = levels.shape
+
+        if betas.shape != (nsites,):
+            raise ValueError(f"betas must have shape ({nsites},), got {betas.shape}")
+        if energies.shape != (nlevels,):
+            raise ValueError(
+                f"energies must have shape ({nlevels},), got {energies.shape}"
+            )
+        if np.any(levels < -atol):
+            raise ValueError("levels must be nonnegative")
+
+        safe_levels = np.where(levels > 0.0, levels, 0.0)
+        occupancies = safe_levels.sum(axis=1)
+
+        logq = -betas[:, None] * energies[None, :]
+
+        if self.degeneracy is not None:
+            degeneracy = np.asarray(self.degeneracy, dtype=float)
+            if np.any(degeneracy <= 0):
+                raise ValueError(
+                    "local-equilibrium KL requires strictly positive degeneracy"
+                )
+
+            if degeneracy.shape == (nlevels,):
+                logq = logq + np.log(degeneracy)[None, :]
+            elif degeneracy.shape == (nsites, nlevels):
+                logq = logq + np.log(degeneracy)
+            else:
+                raise ValueError(
+                    "degeneracy must have shape "
+                    f"({nlevels},) or ({nsites}, {nlevels}), got {degeneracy.shape}"
+                )
+
+        # Stable row-wise log normalization.
+        logq_shifted = logq - np.max(logq, axis=1, keepdims=True)
+        logz = np.log(np.sum(np.exp(logq_shifted), axis=1, keepdims=True)) + np.max(
+            logq, axis=1, keepdims=True
+        )
+        logq = logq - logz
+
+        kl = np.full(nsites, np.nan if normalize_by_site else 0.0, dtype=float)
+
+        occupied = occupancies > 0.0
+        if not np.any(occupied):
+            return kl
+
+        if normalize_by_site:
+            p = safe_levels[occupied] / occupancies[occupied, None]
+            mask = p > 0.0
+            terms = np.zeros_like(p)
+            terms[mask] = p[mask] * (np.log(p[mask]) - logq[occupied][mask])
+            kl[occupied] = terms.sum(axis=1)
+        else:
+            q_weighted_log = logq[occupied] + np.log(occupancies[occupied, None])
+            p = safe_levels[occupied]
+            mask = p > 0.0
+            terms = np.zeros_like(p)
+            terms[mask] = p[mask] * (np.log(p[mask]) - q_weighted_log[mask])
+            kl[occupied] = terms.sum(axis=1)
+
+        return kl
