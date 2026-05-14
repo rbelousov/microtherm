@@ -148,12 +148,15 @@ class State:
         """Return number of particles."""
         return len(self.pos)
 
-    def levels(self, sz: int, epsilon: float) -> dict[str, list[int]]:
+    def levels(
+        self, sz: int, epsilon: float, mx: int | None = None
+    ) -> dict[str, list[int]]:
         """Return particles' spatial bins and energy levels.
 
         Args:
             sz: Number of spatial bins and energy levels
             epsilon: Energy coefficient
+            mx: Optional maximum energy level
 
         Returns:
             Mapping from particle ID to ``[bin, level]``
@@ -165,13 +168,16 @@ class State:
             raise ValueError("Number of bins and levels must be positive")
         if epsilon <= 0:
             raise ValueError("Energy coefficient must be positive")
+        mx = sz if mx is None else mx
+        if mx <= 0:
+            raise ValueError("Maximum energy level must be positive")
 
         bin_width = self.box[0] / sz
         bins = np.floor(self.pos[:, 0] / bin_width).astype(int)
         bins = np.clip(bins, 0, sz - 1)
 
         energies = np.sum(self.vel**2, axis=1) / 2
-        upper_bounds = epsilon * np.arange(1, sz) ** 2 / 2
+        upper_bounds = epsilon * np.arange(1, mx) ** 2 / 2
         levels = np.searchsorted(upper_bounds, energies, side="right")
 
         return {
