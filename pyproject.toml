@@ -12,13 +12,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 
 dependencies = [
-    "numpy",
-    "scipy",
-    "matplotlib",
-    "jupyterlab",
-    "ipywidgets",
-    "tqdm",
-    "uncertainties"
+    "numpy", "scipy"
 ]
 
 [project.optional-dependencies]
