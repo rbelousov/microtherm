@@ -25,7 +25,7 @@ dependencies = [
 tests = ["pytest"]
 dev = ["pytest", "pydocstringformatter", "ruff", "pyright"]
 doc = ["mkdocs", "mkdocstrings[python]", "mkdocs-material"]
-examples = ["matplotlib", "jupyterlab", "ipywidgets", "tqdm", "pillow"]
+examples = ["matplotlib", "jupyterlab", "ipywidgets", "tqdm"]
 
 [tool.setuptools]
 packages = ["microtherm"]
