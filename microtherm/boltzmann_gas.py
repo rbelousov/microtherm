@@ -528,7 +528,6 @@ class Model:
 
     def local_equilibrium_kl(
         self,
-        normalize_by_site: bool = True,
         atol: float = 0.0,
     ) -> npt.NDArray[np.floating]:
         """Return the local-equilibrium KL divergence at each site.
@@ -543,17 +542,11 @@ class Model:
             q_beta(i | ell) ∝ g_i exp[-beta[ell] * epsilon_i].
 
         Args:
-            normalize_by_site: If True, compare conditional distributions over
-                energy levels at each site. If False, compare unnormalized site
-                contributions p[ell, i] against rho[ell] q_beta(i | ell), where
-                rho[ell] is the site occupancy. The resulting value is the same
-                for occupied sites, but empty sites contribute zero instead of NaN.
             atol: Small cutoff used to ignore tiny negative values from numerical
                 noise. Values below -atol still raise an error.
 
         Returns:
-            One-dimensional array kl[ell]. Empty sites return NaN when
-            normalize_by_site=True and 0 when normalize_by_site=False.
+            One-dimensional array kl[ell]. Empty sites return NaN.
         """
         levels = np.asarray(self.state.levels, dtype=float)
         betas = np.asarray(self.state.betas, dtype=float)
@@ -602,24 +595,16 @@ class Model:
         )
         logq = logq - logz
 
-        kl = np.full(nsites, np.nan if normalize_by_site else 0.0, dtype=float)
+        kl = np.full(nsites, np.nan, dtype=float)
 
         occupied = occupancies > 0.0
         if not np.any(occupied):
             return kl
 
-        if normalize_by_site:
-            p = safe_levels[occupied] / occupancies[occupied, None]
-            mask = p > 0.0
-            terms = np.zeros_like(p)
-            terms[mask] = p[mask] * (np.log(p[mask]) - logq[occupied][mask])
-            kl[occupied] = terms.sum(axis=1)
-        else:
-            q_weighted_log = logq[occupied] + np.log(occupancies[occupied, None])
-            p = safe_levels[occupied]
-            mask = p > 0.0
-            terms = np.zeros_like(p)
-            terms[mask] = p[mask] * (np.log(p[mask]) - q_weighted_log[mask])
-            kl[occupied] = terms.sum(axis=1)
+        p = safe_levels[occupied] / occupancies[occupied, None]
+        mask = p > 0.0
+        terms = np.zeros_like(p)
+        terms[mask] = p[mask] * (np.log(p[mask]) - logq[occupied][mask])
+        kl[occupied] = terms.sum(axis=1)
 
         return kl
