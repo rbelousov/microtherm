@@ -160,8 +160,8 @@ class State:
         """Create a Boltzmann-gas state from particle site/energy assignments.
 
         Args:
-            gas_levels: Mapping returned by ``microtherm.gas.State.levels``:
-                ``particle_id -> [site, level]``.
+            gas_levels: Mapping returned by `microtherm.gas.State.levels`:
+                `particle_id -> [site, level]`.
             nsites: Number of sites. If omitted, inferred from the largest
                 observed site index.
             nlevels: Number of energy levels. If omitted, inferred from the
@@ -372,6 +372,109 @@ class Model:
             degeneracy=self.degeneracy,
         )
 
+    def local_equilibrium(
+        self,
+        betas: npt.ArrayLike | None = None,
+    ) -> npt.NDArray[np.floating]:
+        """Return local-equilibrium energy distributions at each site.
+
+        For each site `ell` this computes the conditional Boltzmann
+        distribution over energy levels,
+
+            q[ell, i] = g[ell, i] exp(-beta[ell] epsilon[i]) / z[ell],
+
+        where `z[ell]` is the local partition function. If `betas` is
+        omitted, the current `state.betas` are used. The optional model
+        `degeneracy` may have shape `(nlevels,)` or `(nsites, nlevels)`;
+        if it is omitted, all degeneracies are treated as one.
+
+        Args:
+            betas: Optional inverse-temperature profile with one value per site.
+
+        Returns:
+            Array `q[ell, i]` with shape matching `state.levels`. Each row
+            sums to one.
+
+        Raises:
+            ValueError: If the beta profile, energy levels, or degeneracies have incompatible shapes, if degeneracies are negative, or if a local partition function is zero.
+        """
+        levels = np.asarray(self.state.levels, dtype=float)
+        beta_profile = (
+            np.asarray(self.state.betas, dtype=float)
+            if betas is None
+            else np.asarray(betas, dtype=float)
+        )
+        energies = np.asarray(self.energies, dtype=float)
+
+        if levels.ndim != 2:
+            raise ValueError(f"levels must be two-dimensional, got {levels.ndim}D")
+
+        nsites, nlevels = levels.shape
+
+        if beta_profile.shape != (nsites,):
+            raise ValueError(
+                f"betas must have shape ({nsites},), got {beta_profile.shape}"
+            )
+        if energies.shape != (nlevels,):
+            raise ValueError(
+                f"energies must have shape ({nlevels},), got {energies.shape}"
+            )
+
+        logq = -beta_profile[:, None] * energies[None, :]
+
+        if self.degeneracy is not None:
+            degeneracy = np.asarray(self.degeneracy, dtype=float)
+            if np.any(degeneracy < 0.0):
+                raise ValueError("degeneracy must be nonnegative")
+
+            if degeneracy.shape == (nlevels,):
+                log_degeneracy = np.full_like(degeneracy, -np.inf, dtype=float)
+                positive = degeneracy > 0.0
+                log_degeneracy[positive] = np.log(degeneracy[positive])
+                logq = logq + log_degeneracy[None, :]
+            elif degeneracy.shape == (nsites, nlevels):
+                log_degeneracy = np.full_like(degeneracy, -np.inf, dtype=float)
+                positive = degeneracy > 0.0
+                log_degeneracy[positive] = np.log(degeneracy[positive])
+                logq = logq + log_degeneracy
+            else:
+                raise ValueError(
+                    "degeneracy must have shape "
+                    f"({nlevels},) or ({nsites}, {nlevels}), got {degeneracy.shape}"
+                )
+
+        finite = np.isfinite(logq)
+        if np.any(~np.any(finite, axis=1)):
+            raise ValueError(
+                "local-equilibrium partition function is zero at one or more sites"
+            )
+
+        max_logq = np.max(np.where(finite, logq, -np.inf), axis=1, keepdims=True)
+        q_unnormalized = np.where(finite, np.exp(logq - max_logq), 0.0)
+        return q_unnormalized / q_unnormalized.sum(axis=1, keepdims=True)
+
+    def site_transition(
+        self,
+        betas: npt.ArrayLike | None = None,
+    ) -> npt.NDArray[np.floating]:
+        """Return the local-equilibrium site-to-site transition kernel.
+
+        This evaluates
+
+            P_site[ell, m] = sum_{i,j} P[ell, i, m, j] q[m, j],
+
+        where `q` is the local-equilibrium distribution at the source site
+        `m`. If `betas` is omitted, the current `state.betas` are used.
+        """
+        beta_profile = (
+            np.asarray(self.state.betas, dtype=float)
+            if betas is None
+            else np.asarray(betas, dtype=float)
+        )
+        q = self.local_equilibrium(beta_profile)
+        transition = self.build_transition(beta_profile)
+        return np.einsum("limj,mj->lm", transition, q, optimize=True)
+
     def energy_balance(self, betas: npt.ArrayLike) -> npt.NDArray[np.floating]:
         """Return the site-wise energy-balance residuals.
 
@@ -529,29 +632,25 @@ class Model:
     def effective_diffusion(
         self,
     ) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
-        """Return effective thermal and ordinary diffusion profiles.
+        """Return finite-gradient effective thermal and ordinary diffusion.
 
         Returns:
-            A pair `(thermal, diffusive)` of one-dimensional arrays indexed by destination site `ell`.
+            A pair `(thermal, diffusive)` of one-dimensional arrays indexed by
+            destination site `ell`.
 
         Raises:
             ValueError: If the current beta profile is malformed, if the end-to-end inverse-temperature difference vanishes, or if a local-equilibrium partition function is zero.
         """
         levels = np.asarray(self.state.levels, dtype=float)
         betas = np.asarray(self.state.betas, dtype=float)
-        energies = np.asarray(self.energies, dtype=float)
 
         if levels.ndim != 2:
             raise ValueError(f"levels must be two-dimensional, got {levels.ndim}D")
 
-        nsites, nlevels = levels.shape
+        nsites = levels.shape[0]
 
         if betas.shape != (nsites,):
             raise ValueError(f"betas must have shape ({nsites},), got {betas.shape}")
-        if energies.shape != (nlevels,):
-            raise ValueError(
-                f"energies must have shape ({nlevels},), got {energies.shape}"
-            )
 
         delta_beta = float(betas[-1] - betas[0])
         if delta_beta == 0.0:
@@ -559,46 +658,7 @@ class Model:
                 "effective thermal diffusion requires nonzero beta[-1] - beta[0]"
             )
 
-        logq = -betas[:, None] * energies[None, :]
-
-        if self.degeneracy is not None:
-            degeneracy = np.asarray(self.degeneracy, dtype=float)
-            if np.any(degeneracy < 0.0):
-                raise ValueError("degeneracy must be nonnegative")
-
-            if degeneracy.shape == (nlevels,):
-                log_degeneracy = np.full_like(degeneracy, -np.inf, dtype=float)
-                positive = degeneracy > 0.0
-                log_degeneracy[positive] = np.log(degeneracy[positive])
-                logq = logq + log_degeneracy[None, :]
-            elif degeneracy.shape == (nsites, nlevels):
-                log_degeneracy = np.full_like(degeneracy, -np.inf, dtype=float)
-                positive = degeneracy > 0.0
-                log_degeneracy[positive] = np.log(degeneracy[positive])
-                logq = logq + log_degeneracy
-            else:
-                raise ValueError(
-                    "degeneracy must have shape "
-                    f"({nlevels},) or ({nsites}, {nlevels}), got {degeneracy.shape}"
-                )
-
-        finite = np.isfinite(logq)
-        if np.any(~np.any(finite, axis=1)):
-            raise ValueError(
-                "local-equilibrium partition function is zero at one or more sites"
-            )
-
-        max_logq = np.max(np.where(finite, logq, -np.inf), axis=1, keepdims=True)
-        q_unnormalized = np.where(finite, np.exp(logq - max_logq), 0.0)
-        q = q_unnormalized / q_unnormalized.sum(axis=1, keepdims=True)
-
-        transition = self.build_transition(betas)
-        site_transition = np.einsum(
-            "limj,mj->lm",
-            transition,
-            q,
-            optimize=True,
-        )
+        site_transition = self.site_transition(betas)
 
         dx = 1.0 / nsites
         dt = dx
@@ -611,6 +671,73 @@ class Model:
 
         thermal = nsites * sigma_t / (delta_beta * dt)
         diffusive = sigma_d / dt
+        return thermal, diffusive
+
+    def linear_diffusion(
+        self,
+        beta_bar: float,
+        beta_grad: float,
+    ) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
+        """Return linear-response thermal and ordinary diffusion coefficients.
+
+        Args:
+            beta_bar: Reference inverse temperature.
+            beta_grad: Small inverse-temperature gradient perturbation.
+
+        Returns:
+            A pair `(thermal, diffusive)` of one-dimensional arrays indexed by destination site `ell`.
+        """
+        beta_bar = float(beta_bar)
+        beta_grad = float(beta_grad)
+
+        if beta_bar <= 0.0:
+            raise ValueError("beta_bar must be positive")
+        if beta_grad == 0.0:
+            raise ValueError("beta_grad must be nonzero")
+
+        levels = np.asarray(self.state.levels, dtype=float)
+        if levels.ndim != 2:
+            raise ValueError(f"levels must be two-dimensional, got {levels.ndim}D")
+
+        nsites = levels.shape[0]
+
+        dx = 1.0 / nsites
+        dt = dx
+
+        sites = np.arange(nsites, dtype=float)
+        displacement = dx * (sites[None, :] - sites[:, None])
+
+        betas = np.full(nsites, beta_bar, dtype=float)
+        site_transition = self.site_transition(betas)
+
+        sigma_d = 0.5 * np.sum(displacement**2 * site_transition, axis=1)
+        diffusive = sigma_d / dt
+
+        thermal = np.empty(nsites, dtype=float)
+
+        for ell in range(nsites):
+            beta_gradient_shape = dx * (sites - sites[ell])
+
+            beta_plus = beta_bar + beta_grad * beta_gradient_shape
+            beta_minus = beta_bar - beta_grad * beta_gradient_shape
+
+            if np.any(beta_plus <= 0.0) or np.any(beta_minus <= 0.0):
+                raise ValueError(
+                    "beta_grad is too large: perturbed beta profiles must remain positive"
+                )
+
+            site_transition_plus = self.site_transition(beta_plus)
+            site_transition_minus = self.site_transition(beta_minus)
+
+            sigma_t_plus = np.sum(displacement[ell] * site_transition_plus[ell])
+            sigma_t_minus = np.sum(displacement[ell] * site_transition_minus[ell])
+
+            d_sigma_t_d_grad_beta = (sigma_t_plus - sigma_t_minus) / (2.0 * beta_grad)
+
+            beta_gradient_coefficient = d_sigma_t_d_grad_beta / dt
+
+            # beta = 1 / T, so nabla beta = -beta_bar**2 nabla T.
+            thermal[ell] = -(beta_bar**2) * beta_gradient_coefficient
 
         return thermal, diffusive
 
