@@ -696,18 +696,13 @@ class Model:
         if beta_grad == 0.0:
             raise ValueError("beta_grad must be nonzero")
 
-        levels = np.asarray(self.state.levels, dtype=float)
-        if levels.ndim != 2:
-            raise ValueError(f"levels must be two-dimensional, got {levels.ndim}D")
-
-        nsites = levels.shape[0]
+        nsites = len(self.state)
 
         dx = 1.0 / nsites
         dt = dx
 
         sites = np.arange(nsites, dtype=float)
         displacement = dx * (sites[None, :] - sites[:, None])
-
         betas = np.full(nsites, beta_bar, dtype=float)
         site_transition = self.site_transition(betas)
 
@@ -736,8 +731,6 @@ class Model:
             d_sigma_t_d_grad_beta = (sigma_t_plus - sigma_t_minus) / (2.0 * beta_grad)
 
             beta_gradient_coefficient = d_sigma_t_d_grad_beta / dt
-
-            # beta = 1 / T, so nabla beta = -beta_bar**2 nabla T.
             thermal[ell] = -(beta_bar**2) * beta_gradient_coefficient
 
         return thermal, diffusive
