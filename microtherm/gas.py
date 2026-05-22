@@ -111,8 +111,10 @@ class State:
             for wall in root.findall('.//Local[@Type="Wall"]')
         ]
         diameter = np.mean(diameters)
+        dynamics = root.find(".//Dynamics")
+        gravity = dynamics is not None and dynamics.get("Type") == "NewtonianGravity"
         box = domain.copy()
-        box[0] -= np.sum(diameters)
+        box[2 if gravity else 0] -= np.sum(diameters)
 
         # All particles live under ParticleData/Pt with <P> (position) and <V> (velocity)
         pts = root.findall(".//Pt")
@@ -136,7 +138,10 @@ class State:
                 float(cast(str, v.get("z"))),
             ]
         pos += box / 2
-        pos[:, 1:] %= box[1:]
+        if gravity:
+            pos[:, :2] %= box[:2]
+        else:
+            pos[:, 1:] %= box[1:]
         eps = 1e-2 * diameter
         assert np.all(pos < box + eps) and np.all(pos > -eps), (
             f"Gas state does not fit the simulation box {box}"

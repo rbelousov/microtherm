@@ -79,7 +79,7 @@ class State:
         elif levels is not None:
             nsites = len(cast(np.ndarray, levels))
         else:
-            nsites = len(cast(np.ndarray, betas))  # type: ignore[arg-type]
+            nsites = len(cast(np.ndarray, betas))
 
         assert nsites is not None
 
