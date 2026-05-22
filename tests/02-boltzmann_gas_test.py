@@ -206,7 +206,9 @@ def test_effective_diffusion_matches_site_moments():
     expected_sigma_t = np.sum(displacement * site_transition, axis=1)
     expected_sigma_d = 0.5 * np.sum(displacement**2 * site_transition, axis=1)
 
-    expected_thermal = nsites * expected_sigma_t / ((betas[-1] - betas[0]) * dt)
+    expected_thermal = (
+        nsites * expected_sigma_t / ((betas[-1] ** -1 - betas[0] ** -1) * dt)
+    )
     expected_diffusive = expected_sigma_d / dt
 
     np.testing.assert_allclose(thermal, expected_thermal)

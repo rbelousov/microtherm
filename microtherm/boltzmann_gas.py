@@ -669,7 +669,8 @@ class Model:
         sigma_t = np.sum(displacement * site_transition, axis=1)
         sigma_d = 0.5 * np.sum(displacement**2 * site_transition, axis=1)
 
-        thermal = nsites * sigma_t / (delta_beta * dt)
+        delta_temp = 1 / betas[-1] - 1 / betas[0]
+        thermal = nsites * sigma_t / (delta_temp * dt)
         diffusive = sigma_d / dt
         return thermal, diffusive
 
