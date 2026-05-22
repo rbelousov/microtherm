@@ -162,3 +162,57 @@ def test_model_accepts_precomputed_weights():
     assert new_state.levels.shape == (nsites, nsites)
     assert cast(np.ndarray, new_state.transition).shape == weights.shape
     np.testing.assert_allclose(new_state.levels.sum(), 1.0, atol=1e-12)
+
+
+def test_effective_diffusion_matches_site_moments():
+    """Effective diffusion uses local-equilibrium site-to-site moments."""
+    nsites = 4
+    nlevels = 3
+    dx = 1.0 / nsites
+    dt = dx
+
+    levels = np.ones((nsites, nlevels), dtype=float)
+    levels /= levels.sum()
+
+    betas = np.linspace(1.0, 2.0, nsites)
+    state = State(levels=levels, betas=betas)
+    model = Model(state=state, connectivity=nearest_neighbor_weights(nsites, nlevels))
+
+    thermal, diffusive = model.effective_diffusion()
+
+    transition = model.build_transition(betas)
+
+    q = np.exp(-betas[:, None] * model.energies[None, :])
+    q /= q.sum(axis=1, keepdims=True)
+
+    site_transition = np.einsum("limj,mj->lm", transition, q, optimize=True)
+
+    sites = np.arange(nsites, dtype=float)
+    displacement = dx * (sites[None, :] - sites[:, None])
+
+    expected_sigma_t = np.sum(displacement * site_transition, axis=1)
+    expected_sigma_d = 0.5 * np.sum(displacement**2 * site_transition, axis=1)
+
+    delta_beta = betas[-1] - betas[0]
+
+    expected_thermal = nsites * expected_sigma_t / (delta_beta * dt)
+    expected_diffusive = expected_sigma_d / dt
+
+    np.testing.assert_allclose(thermal, expected_thermal)
+    np.testing.assert_allclose(diffusive, expected_diffusive)
+
+    assert thermal.shape == (nsites,)
+    assert diffusive.shape == (nsites,)
+    assert np.all(diffusive >= 0.0)
+
+
+def test_effective_diffusion_rejects_zero_beta_drop():
+    """The finite-gradient thermal coefficient is undefined at zero beta drop."""
+    nsites = 3
+    levels = np.ones((nsites, nsites), dtype=float)
+    levels /= levels.sum()
+    state = State(levels=levels, betas=np.ones(nsites))
+    model = Model(state=state)
+
+    with pytest.raises(ValueError, match="nonzero beta"):
+        model.effective_diffusion()

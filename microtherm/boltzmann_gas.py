@@ -526,6 +526,94 @@ class Model:
         )
         return self.state
 
+    def effective_diffusion(
+        self,
+    ) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
+        """Return effective thermal and ordinary diffusion profiles.
+
+        Returns:
+            A pair `(thermal, diffusive)` of one-dimensional arrays indexed by destination site `ell`.
+
+        Raises:
+            ValueError: If the current beta profile is malformed, if the end-to-end inverse-temperature difference vanishes, or if a local-equilibrium partition function is zero.
+        """
+        levels = np.asarray(self.state.levels, dtype=float)
+        betas = np.asarray(self.state.betas, dtype=float)
+        energies = np.asarray(self.energies, dtype=float)
+
+        if levels.ndim != 2:
+            raise ValueError(f"levels must be two-dimensional, got {levels.ndim}D")
+
+        nsites, nlevels = levels.shape
+
+        if betas.shape != (nsites,):
+            raise ValueError(f"betas must have shape ({nsites},), got {betas.shape}")
+        if energies.shape != (nlevels,):
+            raise ValueError(
+                f"energies must have shape ({nlevels},), got {energies.shape}"
+            )
+
+        delta_beta = float(betas[-1] - betas[0])
+        if delta_beta == 0.0:
+            raise ValueError(
+                "effective thermal diffusion requires nonzero beta[-1] - beta[0]"
+            )
+
+        logq = -betas[:, None] * energies[None, :]
+
+        if self.degeneracy is not None:
+            degeneracy = np.asarray(self.degeneracy, dtype=float)
+            if np.any(degeneracy < 0.0):
+                raise ValueError("degeneracy must be nonnegative")
+
+            if degeneracy.shape == (nlevels,):
+                log_degeneracy = np.full_like(degeneracy, -np.inf, dtype=float)
+                positive = degeneracy > 0.0
+                log_degeneracy[positive] = np.log(degeneracy[positive])
+                logq = logq + log_degeneracy[None, :]
+            elif degeneracy.shape == (nsites, nlevels):
+                log_degeneracy = np.full_like(degeneracy, -np.inf, dtype=float)
+                positive = degeneracy > 0.0
+                log_degeneracy[positive] = np.log(degeneracy[positive])
+                logq = logq + log_degeneracy
+            else:
+                raise ValueError(
+                    "degeneracy must have shape "
+                    f"({nlevels},) or ({nsites}, {nlevels}), got {degeneracy.shape}"
+                )
+
+        finite = np.isfinite(logq)
+        if np.any(~np.any(finite, axis=1)):
+            raise ValueError(
+                "local-equilibrium partition function is zero at one or more sites"
+            )
+
+        max_logq = np.max(np.where(finite, logq, -np.inf), axis=1, keepdims=True)
+        q_unnormalized = np.where(finite, np.exp(logq - max_logq), 0.0)
+        q = q_unnormalized / q_unnormalized.sum(axis=1, keepdims=True)
+
+        transition = self.build_transition(betas)
+        site_transition = np.einsum(
+            "limj,mj->lm",
+            transition,
+            q,
+            optimize=True,
+        )
+
+        dx = 1.0 / nsites
+        dt = dx
+
+        sites = np.arange(nsites, dtype=float)
+        displacement = dx * (sites[None, :] - sites[:, None])
+
+        sigma_t = np.sum(displacement * site_transition, axis=1)
+        sigma_d = 0.5 * np.sum(displacement**2 * site_transition, axis=1)
+
+        thermal = nsites * sigma_t / (delta_beta * dt)
+        diffusive = sigma_d / dt
+
+        return thermal, diffusive
+
     def local_equilibrium_kl(
         self,
         atol: float = 0.0,
