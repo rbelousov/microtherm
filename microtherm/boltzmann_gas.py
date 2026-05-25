@@ -629,51 +629,6 @@ class Model:
         )
         return self.state
 
-    def effective_diffusion(
-        self,
-    ) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
-        """Return finite-gradient effective thermal and ordinary diffusion.
-
-        Returns:
-            A pair `(thermal, diffusive)` of one-dimensional arrays indexed by
-            destination site `ell`.
-
-        Raises:
-            ValueError: If the current beta profile is malformed, if the end-to-end inverse-temperature difference vanishes, or if a local-equilibrium partition function is zero.
-        """
-        levels = np.asarray(self.state.levels, dtype=float)
-        betas = np.asarray(self.state.betas, dtype=float)
-
-        if levels.ndim != 2:
-            raise ValueError(f"levels must be two-dimensional, got {levels.ndim}D")
-
-        nsites = levels.shape[0]
-
-        if betas.shape != (nsites,):
-            raise ValueError(f"betas must have shape ({nsites},), got {betas.shape}")
-
-        delta_beta = float(betas[-1] - betas[0])
-        if delta_beta == 0.0:
-            raise ValueError(
-                "effective thermal diffusion requires nonzero beta[-1] - beta[0]"
-            )
-
-        site_transition = self.site_transition(betas)
-
-        dx = 1.0 / nsites
-        dt = dx
-
-        sites = np.arange(nsites, dtype=float)
-        displacement = dx * (sites[None, :] - sites[:, None])
-
-        sigma_t = np.sum(displacement * site_transition, axis=1)
-        sigma_d = 0.5 * np.sum(displacement**2 * site_transition, axis=1)
-
-        delta_temp = 1 / betas[-1] - 1 / betas[0]
-        thermal = nsites * sigma_t / (delta_temp * dt)
-        diffusive = sigma_d / dt
-        return thermal, diffusive
-
     def linear_diffusion(
         self,
         beta_bar: float,
@@ -686,7 +641,7 @@ class Model:
             beta_grad: Small inverse-temperature gradient perturbation.
 
         Returns:
-            A pair `(thermal, diffusive)` of one-dimensional arrays indexed by destination site `ell`.
+            A pair `(thermal, diffusive)` of one-dimensional arrays indexed by site `ell`.
         """
         beta_bar = float(beta_bar)
         beta_grad = float(beta_grad)
@@ -697,6 +652,7 @@ class Model:
             raise ValueError("beta_grad must be nonzero")
 
         nsites = len(self.state)
+        mid = (nsites - 1) / 2
 
         dx = 1.0 / nsites
         dt = dx
@@ -710,28 +666,73 @@ class Model:
         diffusive = sigma_d / dt
 
         thermal = np.empty(nsites, dtype=float)
+        beta_gradient_shape = dx * (sites - mid)
+        beta_plus = beta_bar + beta_grad * beta_gradient_shape
+        beta_minus = beta_bar - beta_grad * beta_gradient_shape
+        if np.any(beta_plus <= 0.0) or np.any(beta_minus <= 0.0):
+            raise ValueError(
+                "beta_grad is too large: perturbed beta profiles must remain positive"
+            )
 
-        for ell in range(nsites):
-            beta_gradient_shape = dx * (sites - sites[ell])
+        site_transition_plus = self.site_transition(beta_plus)
+        site_transition_minus = self.site_transition(beta_minus)
+        sigma_t_plus = np.sum(displacement * site_transition_plus, axis=1)
+        sigma_t_minus = np.sum(displacement * site_transition_minus, axis=1)
 
-            beta_plus = beta_bar + beta_grad * beta_gradient_shape
-            beta_minus = beta_bar - beta_grad * beta_gradient_shape
+        d_sigma_t_d_grad_beta = (sigma_t_plus - sigma_t_minus) / (2.0 * beta_grad)
 
-            if np.any(beta_plus <= 0.0) or np.any(beta_minus <= 0.0):
-                raise ValueError(
-                    "beta_grad is too large: perturbed beta profiles must remain positive"
-                )
+        beta_gradient_coefficient = d_sigma_t_d_grad_beta / dt
+        thermal = -(beta_bar**2) * beta_gradient_coefficient
 
-            site_transition_plus = self.site_transition(beta_plus)
-            site_transition_minus = self.site_transition(beta_minus)
+        return thermal, diffusive
 
-            sigma_t_plus = np.sum(displacement[ell] * site_transition_plus[ell])
-            sigma_t_minus = np.sum(displacement[ell] * site_transition_minus[ell])
+    def effective_diffusion(
+        self,
+        beta_bar: float,
+        beta_grad: float,
+    ) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
+        """Return finite-gradient thermal and ordinary diffusion coefficients.
 
-            d_sigma_t_d_grad_beta = (sigma_t_plus - sigma_t_minus) / (2.0 * beta_grad)
+        Args:
+            beta_bar: Reference inverse temperature.
+            beta_grad: Small inverse-temperature gradient perturbation.
 
-            beta_gradient_coefficient = d_sigma_t_d_grad_beta / dt
-            thermal[ell] = -(beta_bar**2) * beta_gradient_coefficient
+        Returns:
+            A pair `(thermal, diffusive)` of one-dimensional arrays indexed by site `ell`.
+        """
+        beta_bar = float(beta_bar)
+        beta_grad = float(beta_grad)
+
+        if beta_bar <= 0.0:
+            raise ValueError("beta_bar must be positive")
+        if beta_grad == 0.0:
+            raise ValueError("beta_grad must be nonzero")
+
+        nsites = len(self.state)
+        mid = (nsites - 1) / 2
+
+        dx = 1.0 / nsites
+        dt = dx
+
+        sites = np.arange(nsites, dtype=float)
+        displacement = dx * (sites[None, :] - sites[:, None])
+        betas = np.full(nsites, beta_bar, dtype=float)
+        site_transition = self.site_transition(betas)
+
+        sigma_d = 0.5 * np.sum(displacement**2 * site_transition, axis=1)
+        sigma_t = np.sum(displacement * site_transition, axis=1)
+        diffusive = sigma_d / dt
+
+        beta_with_grad = beta_bar + beta_grad * dx * (sites - mid)
+        if np.any(beta_with_grad <= 0.0):
+            raise ValueError(
+                "beta_grad is too large: perturbed beta profiles must remain positive"
+            )
+
+        site_transition_grad = self.site_transition(beta_with_grad)
+        sigma_t_grad = np.sum(displacement * site_transition_grad, axis=1)
+        dT = beta_with_grad[-1] ** -1 - beta_with_grad[0] ** -1
+        thermal = (sigma_t_grad - sigma_t) / (dT * dt)
 
         return thermal, diffusive
 

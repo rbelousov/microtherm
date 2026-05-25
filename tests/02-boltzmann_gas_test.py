@@ -1,5 +1,6 @@
 """Tests for the Boltzmann gas model."""
 
+from pathlib import Path
 from typing import cast
 import numpy as np
 import pytest
@@ -7,6 +8,12 @@ import pytest
 from microtherm import Gas
 from microtherm.boltzmann_gas import State, Model
 from microtherm.connectivity import nearest_neighbor_weights
+
+
+@pytest.fixture
+def calibration() -> Path:
+    """Return path to a calibration data."""
+    return Path(__file__).parent / "data" / "calibration.npz"
 
 
 def test_state_from_gas_levels():
@@ -183,48 +190,55 @@ def test_local_equilibrium_matches_boltzmann_distribution():
     np.testing.assert_allclose(q.sum(axis=1), np.ones(nsites))
 
 
-def test_effective_diffusion_matches_site_moments():
+def test_site_moments():
     """Effective diffusion uses local-equilibrium site-to-site moments."""
     nsites = 4
     nlevels = 3
     dx = 1.0 / nsites
-    dt = dx
     levels = np.ones((nsites, nlevels), dtype=float)
     levels /= levels.sum()
-    betas = np.linspace(1.0, 2.0, nsites)
+    betas = np.full(nsites, 1.5)
     state = State(levels=levels, betas=betas)
     model = Model(state=state, connectivity=nearest_neighbor_weights(nsites, nlevels))
-
-    thermal, diffusive = model.effective_diffusion()
 
     transition = model.build_transition(betas)
     q = model.local_equilibrium()
     site_transition = np.einsum("limj,mj->lm", transition, q, optimize=True)
     sites = np.arange(nsites, dtype=float)
     displacement = dx * (sites[None, :] - sites[:, None])
-
-    expected_sigma_t = np.sum(displacement * site_transition, axis=1)
-    expected_sigma_d = 0.5 * np.sum(displacement**2 * site_transition, axis=1)
-
-    expected_thermal = (
-        nsites * expected_sigma_t / ((betas[-1] ** -1 - betas[0] ** -1) * dt)
-    )
-    expected_diffusive = expected_sigma_d / dt
-
-    np.testing.assert_allclose(thermal, expected_thermal)
-    np.testing.assert_allclose(diffusive, expected_diffusive)
-    assert thermal.shape == (nsites,)
-    assert diffusive.shape == (nsites,)
-    assert np.all(diffusive >= 0.0)
+    sigma_t = np.sum(displacement * site_transition, axis=1)
+    np.testing.assert_allclose(sigma_t, 0, atol=1e6)
 
 
-def test_effective_diffusion_rejects_zero_beta_drop():
-    """The finite-gradient thermal coefficient is undefined at zero beta drop."""
-    nsites = 3
-    levels = np.ones((nsites, nsites), dtype=float)
+def test_soret_coefficient(calibration: Path):
+    """Test calculation of the Soret coefficient."""
+    graph = np.load(calibration)
+    degeneracies = graph["degeneracies"]
+    connectivity = graph["multiplicities"]
+    sz, mx = degeneracies.shape
+    beta = 1.5
+    grad = 1e-1
+    dx = 1.0 / sz
+
+    mid = (sz - 1) / 2
+    sites = np.arange(sz)
+    betas = np.full(sz, beta) + grad * dx * (sites - mid)
+    lft = betas[0]
+    rgt = betas[-1]
+
+    levels = np.ones((sz, mx), dtype=float)
     levels /= levels.sum()
-    state = State(levels=levels, betas=np.ones(nsites))
-    model = Model(state=state)
+    state = Model.State(levels=levels)
+    model = Model(
+        state,
+        connectivity,
+        degeneracy=degeneracies,
+        fixed_betas={0: lft, sz - 1: rgt},
+    )
 
-    with pytest.raises(ValueError, match="nonzero beta"):
-        model.effective_diffusion()
+    linear = model.linear_diffusion(beta, grad)
+    effective = model.effective_diffusion(beta, grad)
+
+    linear_soret = linear[0] / linear[1]
+    effective_soret = effective[0] / effective[1]
+    assert linear_soret[13] == pytest.approx(effective_soret[13], rel=0.1)

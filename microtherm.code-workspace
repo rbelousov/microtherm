@@ -5,15 +5,6 @@
 		},
 		{
 			"path": "../../ownCloud/work/microtherm.wrk"
-		},
-		{
-			"path": "../microtherm"
-		},
-		{
-			"path": "../../ownCloud/work/microtherm.old"
-		},
-		{
-			"path": "../../data/dynamo"
 		}
 	]
 }
