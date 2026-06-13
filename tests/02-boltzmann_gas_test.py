@@ -208,37 +208,3 @@ def test_site_moments():
     displacement = dx * (sites[None, :] - sites[:, None])
     sigma_t = np.sum(displacement * site_transition, axis=1)
     np.testing.assert_allclose(sigma_t, 0, atol=1e6)
-
-
-def test_soret_coefficient(calibration: Path):
-    """Test calculation of the Soret coefficient."""
-    graph = np.load(calibration)
-    degeneracies = graph["degeneracies"]
-    connectivity = graph["multiplicities"]
-    sz, mx = degeneracies.shape
-    beta = 1.5
-    grad = 1e-1
-    dx = 1.0 / sz
-
-    mid = (sz - 1) / 2
-    sites = np.arange(sz)
-    betas = np.full(sz, beta) + grad * dx * (sites - mid)
-    lft = betas[0]
-    rgt = betas[-1]
-
-    levels = np.ones((sz, mx), dtype=float)
-    levels /= levels.sum()
-    state = Model.State(levels=levels)
-    model = Model(
-        state,
-        connectivity,
-        degeneracy=degeneracies,
-        fixed_betas={0: lft, sz - 1: rgt},
-    )
-
-    linear = model.linear_diffusion(beta, grad)
-    effective = model.effective_diffusion(beta, grad)
-
-    linear_soret = linear[0] / linear[1]
-    effective_soret = effective[0] / effective[1]
-    assert linear_soret[13] == pytest.approx(effective_soret[13], rel=0.1)

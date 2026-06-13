@@ -629,192 +629,40 @@ class Model:
         )
         return self.state
 
-    def linear_diffusion(
-        self,
-        beta_bar: float,
-        beta_grad: float,
-    ) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
-        """Return linear-response thermal and ordinary diffusion coefficients.
+    def linear_thermodiffusion(self, beta: float, delta: float = 1e-5):
+        """Return linear-response diffusion and thermal-diffusion coefficients.
 
         Args:
-            beta_bar: Reference inverse temperature.
-            beta_grad: Small inverse-temperature gradient perturbation.
+            beta: Reference inverse temperature.
+            delta: Small perturbation of the inverse temperature.
 
         Returns:
             A pair `(thermal, diffusive)` of one-dimensional arrays indexed by site `ell`.
         """
-        beta_bar = float(beta_bar)
-        beta_grad = float(beta_grad)
 
-        if beta_bar <= 0.0:
-            raise ValueError("beta_bar must be positive")
-        if beta_grad == 0.0:
-            raise ValueError("beta_grad must be nonzero")
+        beta = float(beta)
+        delta = float(delta)
 
         nsites = len(self.state)
-        mid = (nsites - 1) / 2
-
         dx = 1.0 / nsites
         dt = dx
 
         sites = np.arange(nsites, dtype=float)
         displacement = dx * (sites[None, :] - sites[:, None])
-        betas = np.full(nsites, beta_bar, dtype=float)
-        site_transition = self.site_transition(betas)
 
-        sigma_d = 0.5 * np.sum(displacement**2 * site_transition, axis=1)
+        betas0 = np.full(nsites, beta)
+        betasp = np.full(nsites, beta + delta)
+        betasm = np.full(nsites, beta - delta)
+        kernel0 = self.site_transition(betas0)
+        kernelp = self.site_transition(betasp)
+        kernelm = self.site_transition(betasm)
+
+        sigma_d = 0.5 * np.sum(displacement**2 * kernel0, axis=1)
+
+        dkernel = (kernelp - kernelm) / (2.0 * delta)
+        sigma_t = 0.5 * np.sum(displacement**2 * dkernel, axis=1)
+
+        thermal = -(beta**2) * sigma_t / dt
         diffusive = sigma_d / dt
 
-        thermal = np.empty(nsites, dtype=float)
-        beta_gradient_shape = dx * (sites - mid)
-        beta_plus = beta_bar + beta_grad * beta_gradient_shape
-        beta_minus = beta_bar - beta_grad * beta_gradient_shape
-        if np.any(beta_plus <= 0.0) or np.any(beta_minus <= 0.0):
-            raise ValueError(
-                "beta_grad is too large: perturbed beta profiles must remain positive"
-            )
-
-        site_transition_plus = self.site_transition(beta_plus)
-        site_transition_minus = self.site_transition(beta_minus)
-        sigma_t_plus = np.sum(displacement * site_transition_plus, axis=1)
-        sigma_t_minus = np.sum(displacement * site_transition_minus, axis=1)
-
-        d_sigma_t_d_grad_beta = (sigma_t_plus - sigma_t_minus) / (2.0 * beta_grad)
-
-        beta_gradient_coefficient = d_sigma_t_d_grad_beta / dt
-        thermal = -(beta_bar**2) * beta_gradient_coefficient
-
         return thermal, diffusive
-
-    def effective_diffusion(
-        self,
-        beta_bar: float,
-        beta_grad: float,
-    ) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
-        """Return finite-gradient thermal and ordinary diffusion coefficients.
-
-        Args:
-            beta_bar: Reference inverse temperature.
-            beta_grad: Small inverse-temperature gradient perturbation.
-
-        Returns:
-            A pair `(thermal, diffusive)` of one-dimensional arrays indexed by site `ell`.
-        """
-        beta_bar = float(beta_bar)
-        beta_grad = float(beta_grad)
-
-        if beta_bar <= 0.0:
-            raise ValueError("beta_bar must be positive")
-        if beta_grad == 0.0:
-            raise ValueError("beta_grad must be nonzero")
-
-        nsites = len(self.state)
-        mid = (nsites - 1) / 2
-
-        dx = 1.0 / nsites
-        dt = dx
-
-        sites = np.arange(nsites, dtype=float)
-        displacement = dx * (sites[None, :] - sites[:, None])
-        betas = np.full(nsites, beta_bar, dtype=float)
-        site_transition = self.site_transition(betas)
-
-        sigma_d = 0.5 * np.sum(displacement**2 * site_transition, axis=1)
-        sigma_t = np.sum(displacement * site_transition, axis=1)
-        diffusive = sigma_d / dt
-
-        beta_with_grad = beta_bar + beta_grad * dx * (sites - mid)
-        if np.any(beta_with_grad <= 0.0):
-            raise ValueError(
-                "beta_grad is too large: perturbed beta profiles must remain positive"
-            )
-
-        site_transition_grad = self.site_transition(beta_with_grad)
-        sigma_t_grad = np.sum(displacement * site_transition_grad, axis=1)
-        dT = beta_with_grad[-1] ** -1 - beta_with_grad[0] ** -1
-        thermal = (sigma_t_grad - sigma_t) / (dT * dt)
-
-        return thermal, diffusive
-
-    def local_equilibrium_kl(
-        self,
-        atol: float = 0.0,
-    ) -> npt.NDArray[np.floating]:
-        """Return the local-equilibrium KL divergence at each site.
-
-        For each site ell, this computes
-
-            D_KL[p(i | ell) || q_beta(i | ell)]
-
-        where p(i | ell) is the current conditional distribution over energy
-        levels at site ell, and q_beta is the local Boltzmann distribution
-
-            q_beta(i | ell) ∝ g_i exp[-beta[ell] * epsilon_i].
-
-        Args:
-            atol: Small cutoff used to ignore tiny negative values from numerical
-                noise. Values below -atol still raise an error.
-
-        Returns:
-            One-dimensional array kl[ell]. Empty sites return NaN.
-        """
-        levels = np.asarray(self.state.levels, dtype=float)
-        betas = np.asarray(self.state.betas, dtype=float)
-        energies = np.asarray(self.energies, dtype=float)
-
-        if levels.ndim != 2:
-            raise ValueError(f"levels must be two-dimensional, got {levels.ndim}D")
-
-        nsites, nlevels = levels.shape
-
-        if betas.shape != (nsites,):
-            raise ValueError(f"betas must have shape ({nsites},), got {betas.shape}")
-        if energies.shape != (nlevels,):
-            raise ValueError(
-                f"energies must have shape ({nlevels},), got {energies.shape}"
-            )
-        if np.any(levels < -atol):
-            raise ValueError("levels must be nonnegative")
-
-        safe_levels = np.where(levels > 0.0, levels, 0.0)
-        occupancies = safe_levels.sum(axis=1)
-
-        logq = -betas[:, None] * energies[None, :]
-
-        if self.degeneracy is not None:
-            degeneracy = np.asarray(self.degeneracy, dtype=float)
-            if np.any(degeneracy <= 0):
-                raise ValueError(
-                    "local-equilibrium KL requires strictly positive degeneracy"
-                )
-
-            if degeneracy.shape == (nlevels,):
-                logq = logq + np.log(degeneracy)[None, :]
-            elif degeneracy.shape == (nsites, nlevels):
-                logq = logq + np.log(degeneracy)
-            else:
-                raise ValueError(
-                    "degeneracy must have shape "
-                    f"({nlevels},) or ({nsites}, {nlevels}), got {degeneracy.shape}"
-                )
-
-        # Stable row-wise log normalization.
-        logq_shifted = logq - np.max(logq, axis=1, keepdims=True)
-        logz = np.log(np.sum(np.exp(logq_shifted), axis=1, keepdims=True)) + np.max(
-            logq, axis=1, keepdims=True
-        )
-        logq = logq - logz
-
-        kl = np.full(nsites, np.nan, dtype=float)
-
-        occupied = occupancies > 0.0
-        if not np.any(occupied):
-            return kl
-
-        p = safe_levels[occupied] / occupancies[occupied, None]
-        mask = p > 0.0
-        terms = np.zeros_like(p)
-        terms[mask] = p[mask] * (np.log(p[mask]) - logq[occupied][mask])
-        kl[occupied] = terms.sum(axis=1)
-
-        return kl
