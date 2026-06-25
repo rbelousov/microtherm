@@ -453,6 +453,65 @@ class Model:
         q_unnormalized = np.where(finite, np.exp(logq - max_logq), 0.0)
         return q_unnormalized / q_unnormalized.sum(axis=1, keepdims=True)
 
+    def local_equilibrium_kl(
+        self,
+        normalize_by_site: bool = True,
+        atol: float = 0.0,
+    ) -> npt.NDArray[np.floating]:
+        """Return the local-equilibrium KL divergence at each site.
+
+        For each site ell, this computes
+
+            D_KL[p(i | ell) || q_beta(i | ell)]
+
+        where p(i | ell) is the current conditional distribution over energy
+        levels at site ell, and q_beta is the local Boltzmann distribution.
+
+        Args:
+            normalize_by_site: If True, compare conditional distributions over
+                energy levels at each site. If False, compare unnormalized site
+                contributions p[ell, i] against rho[ell] q_beta(i | ell),
+                where rho[ell] is the site occupancy. The resulting value is
+                weighted by rho[ell].
+            atol: Small cutoff used to ignore tiny negative values from numerical
+                noise. Values below -atol still raise an error.
+
+        Returns:
+            One-dimensional array kl[ell]. Empty sites return NaN when
+            normalize_by_site=True and 0 when normalize_by_site=False.
+        """
+        levels = np.asarray(self.state.levels, dtype=float)
+
+        if levels.ndim != 2:
+            raise ValueError(f"levels must be two-dimensional, got {levels.ndim}D")
+        if np.any(levels < -atol):
+            raise ValueError("levels must be nonnegative")
+
+        safe_levels = np.where(levels > 0.0, levels, 0.0)
+        occupancies = safe_levels.sum(axis=1)
+        q = self.local_equilibrium()
+
+        nsites = levels.shape[0]
+        kl = np.full(nsites, np.nan if normalize_by_site else 0.0, dtype=float)
+
+        occupied = occupancies > 0.0
+        if not np.any(occupied):
+            return kl
+
+        if normalize_by_site:
+            p = safe_levels[occupied] / occupancies[occupied, None]
+            reference = q[occupied]
+        else:
+            p = safe_levels[occupied]
+            reference = q[occupied] * occupancies[occupied, None]
+
+        mask = p > 0.0
+        terms = np.zeros_like(p)
+        terms[mask] = p[mask] * (np.log(p[mask]) - np.log(reference[mask]))
+        kl[occupied] = terms.sum(axis=1)
+
+        return kl
+
     def site_transition(
         self,
         betas: npt.ArrayLike | None = None,

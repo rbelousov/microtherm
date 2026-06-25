@@ -190,6 +190,27 @@ def test_local_equilibrium_matches_boltzmann_distribution():
     np.testing.assert_allclose(q.sum(axis=1), np.ones(nsites))
 
 
+def test_local_equilibrium_kl():
+    """Local-equilibrium KL vanishes for local Boltzmann distributions."""
+    nsites = 4
+    nlevels = 3
+    occupancies = np.array([0.2, 0.3, 0.0, 0.5])
+    betas = np.linspace(1.0, 2.0, nsites)
+    empty_levels = np.zeros((nsites, nlevels), dtype=float)
+    state = State(levels=empty_levels, betas=betas)
+    model = Model(state=state, connectivity=nearest_neighbor_weights(nsites, nlevels))
+
+    q = model.local_equilibrium()
+    model.state.levels = occupancies[:, None] * q
+
+    kl = model.local_equilibrium_kl()
+    weighted_kl = model.local_equilibrium_kl(normalize_by_site=False)
+
+    np.testing.assert_allclose(kl[[0, 1, 3]], 0.0, atol=1e-12)
+    np.testing.assert_allclose(weighted_kl, 0.0, atol=1e-12)
+    assert np.isnan(kl[2])
+
+
 def test_site_moments():
     """Effective diffusion uses local-equilibrium site-to-site moments."""
     nsites = 4
