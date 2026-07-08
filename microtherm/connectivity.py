@@ -41,12 +41,12 @@ def reflect_index(nsites: int, target: int) -> int:
     return int(period - 1 - r)
 
 
-def nearest_neighbor_weights(nsites: int, nlevels: int) -> np.ndarray:
-    """Nearest-neighbor transition weights with reflective path multiplicities.
+def nearest_neighbor_weights(nsites: int, nlevels: int, reflect = True) -> np.ndarray:
+    """Nearest-neighbor transition weights with optional reflective path multiplicities.
 
     The nearest-neighbor graph allows transitions between sites with |ell - m| <= 1
-    before reflection. Reflection does not merely clip the target site: it
-    increases the path multiplicity gamma_IJ when multiple attempted moves
+    before reflection. Reflection applied by default does not merely clip the target site:
+    it increases the path multiplicity gamma_IJ when multiple attempted moves
     land on the same reflected target.
 
     All destination and source energy-level pairs are structurally allowed.
@@ -56,6 +56,7 @@ def nearest_neighbor_weights(nsites: int, nlevels: int) -> np.ndarray:
     Args:
         nsites: Number of lattice sites.
         nlevels: Number of energy levels.
+        reflect: If True (default), reflective boundary conditions apply.
 
     Returns:
         Weight tensor w[ell, i, m, j].
@@ -68,11 +69,18 @@ def nearest_neighbor_weights(nsites: int, nlevels: int) -> np.ndarray:
     weights = np.zeros((nsites, nlevels, nsites, nlevels), dtype=float)
 
     for source_site in range(nsites):
-        # Attempted nearest-neighbor displacements. Reflections may map
-        # multiple attempts to the same target_site, giving gamma > 1.
-        target_sites = [
-            reflect_index(nsites, source_site + delta) for delta in (-1, 0, 1)
-        ]
+        if reflect:
+            # Attempted nearest-neighbor displacements. Reflections may map
+            # multiple attempts to the same target_site, giving gamma > 1.
+            target_sites = [
+                reflect_index(nsites, source_site + delta) for delta in (-1, 0, 1)
+            ]
+        else:
+            target_sites = []
+            for delta in (-1, 0, 1):
+                target_site = source_site + delta
+                if 0 <= target_site and target_site < nsites:
+                    target_sites.append(target_site)
 
         for target_site in target_sites:
             # All target/source energy-level pairs have the same structural
