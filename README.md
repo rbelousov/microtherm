@@ -1,10 +1,32 @@
 # Microtherm
 
-This repository contains code and supporting information for the microcaliber theory of thermodiffusion.
+This repository contains code, examples, and supporting information for the microcaliber theory of thermodiffusion.
 
-## Preprint
+## Installation
 
-To cite our work please refer to the [preprint](https://arxiv.org/abs/2607.27839):
+Get the source code and install using pip, e.g.
+
+```bash
+git clone https://git.embl.de/rbelouso/microcaliber.git microcaliber && cd microcaliber
+pip install .[examples]
+```
+
+To install with test dependencies, replace the last of the above commands with `pip install .[tests]`.
+
+## Supplemental materials
+
+Supplemental materials are deposited here as [sm.pdf](/sm.pdf).
+
+
+## Usage
+
+Examples of simulations are provided in the directory `examples`, containing a 
+collection Jupyter notebooks. These notebooks require optional dependencies from the `examples` group—make sure to install them with `pip install .[examples]`.
+
+
+## Authors and acknowledgment
+
+Please cite our preprint R. Belousov, J. Elliott, A. Erzberger, Ensemble theory of thermodiffusion, [arXiv:2607.27839](https://doi.org/10.48550/arXiv.2607.27839): 
 
 ```bibtex
 @misc{belousov2026microtherm,
@@ -19,6 +41,6 @@ To cite our work please refer to the [preprint](https://arxiv.org/abs/2607.27839
 }
 ```
 
-## Supplemental materials
+## License
 
-Supplemental materials are deposited here as [sm.pdf](/sm.pdf).
+The code is distributed under MIT license (see[LICENSE](https://git.embl.de/rbelouso/microtherm/LICENSE)).
